@@ -1,0 +1,80 @@
+{
+  "sessionName": "DCP interop fixture",
+  "prune": {
+    "tools": {},
+    "messages": {
+      "byMessageId": {
+        "msg_user_1": {
+          "tokenCount": 12,
+          "allBlockIds": [
+            1
+          ],
+          "activeBlockIds": [
+            1
+          ]
+        },
+        "msg_assistant_1": {
+          "tokenCount": 15,
+          "allBlockIds": [
+            1
+          ],
+          "activeBlockIds": [
+            1
+          ]
+        }
+      },
+      "blocksById": {
+        "1": {
+          "blockId": 1,
+          "runId": 1,
+          "active": true,
+          "deactivatedByUser": false,
+          "compressedTokens": 120,
+          "summaryTokens": 42,
+          "durationMs": 50,
+          "mode": "range",
+          "topic": "Legacy auth",
+          "batchTopic": "Legacy auth",
+          "startId": "m0001",
+          "endId": "m0002",
+          "anchorMessageId": "msg_assistant_2",
+          "compressMessageId": "msg_compress_1",
+          "compressCallId": "call_compress_1",
+          "includedBlockIds": [],
+          "consumedBlockIds": [],
+          "parentBlockIds": [],
+          "directMessageIds": [
+            "msg_user_1",
+            "msg_assistant_1"
+          ],
+          "directToolIds": [],
+          "effectiveMessageIds": [
+            "msg_user_1",
+            "msg_assistant_1"
+          ],
+          "effectiveToolIds": [],
+          "createdAt": 4500,
+          "summary": "[Compressed conversation section]\nSe exploró el auth antiguo y se confirmó que DCP guarda el estado en ~/.local/share/opencode/storage/plugin/dcp.\n\n<dcp-message-id>b1</dcp-message-id>"
+        }
+      },
+      "activeBlockIds": [
+        1
+      ],
+      "activeByAnchorMessageId": {
+        "msg_assistant_2": 1
+      },
+      "nextBlockId": 2,
+      "nextRunId": 2
+    }
+  },
+  "nudges": {
+    "contextLimitAnchors": [],
+    "turnNudgeAnchors": [],
+    "iterationNudgeAnchors": []
+  },
+  "stats": {
+    "pruneTokenCounter": 0,
+    "totalPruneTokens": 0
+  },
+  "lastUpdated": "2026-04-23T00:00:00.000Z"
+}

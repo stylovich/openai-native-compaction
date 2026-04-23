@@ -9,6 +9,11 @@ const DEFAULT_RETRY_BASE_MS = 750;
 const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 6_000;
 const DEFAULT_API_KEY_FILE = `${process.env.HOME || ""}/.config/opencode/openai-native-compaction.key`;
 const DEFAULT_OPENCODE_AUTH_PATH = `${process.env.HOME || ""}/.local/share/opencode/auth.json`;
+const DEFAULT_DCP_STORAGE_DIR = `${process.env.XDG_DATA_HOME || `${process.env.HOME || ""}/.local/share`}/opencode/storage/plugin/dcp`;
+const DCP_COMPRESSED_BLOCK_HEADER = "[Compressed conversation section]";
+const DCP_HEADER_REGEX = /^\s*\[Compressed conversation(?: section)?(?: b\d+)?\]/i;
+const DCP_TRAILING_BLOCK_TAG_REGEX = /(?:\r?\n)*<dcp-message-id(?=[\s>])[^>]*>b\d+<\/dcp-message-id>\s*$/i;
+const DCP_PAIRED_TAG_REGEX = /<dcp[^>]*>[\s\S]*?<\/dcp[^>]*>/gi;
 
 // Preserve operational continuity while retaining important factual discoveries.
 const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
@@ -362,6 +367,7 @@ function turns(messages) {
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i];
     if (message?.info?.role !== "user") continue;
+    if (isSyntheticDcpSummaryMessage(message)) continue;
     if ((message.parts ?? []).some((part) => part?.type === "compaction")) continue;
 
     result.push({ start: i, end: messages.length, id: message.info.id });
@@ -510,6 +516,163 @@ function renderMessage(message, options) {
   }
 
   return chunks.join("\n\n").trim();
+}
+
+function isSyntheticDcpSummaryMessage(message) {
+  return message?.meta?.syntheticDcpSummary === true;
+}
+
+function findLastUserMessage(messages, startIndex) {
+  const start = startIndex ?? messages.length - 1;
+
+  for (let i = start; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.info?.role !== "user") continue;
+    if (isSyntheticDcpSummaryMessage(message)) continue;
+    if ((message.parts ?? []).some((part) => part?.type === "compaction")) continue;
+    return message;
+  }
+
+  return undefined;
+}
+
+function normalizeDcpSummary(summary) {
+  if (typeof summary !== "string" || !summary.trim()) return "";
+
+  const trimmed = summary.trim();
+  const withoutHeader = DCP_HEADER_REGEX.test(trimmed)
+    ? trimmed.slice(trimmed.match(DCP_HEADER_REGEX)[0].length).replace(/^(?:\r?\n)+/, "")
+    : trimmed;
+
+  return withoutHeader
+    .replace(DCP_TRAILING_BLOCK_TAG_REGEX, "")
+    .replace(DCP_PAIRED_TAG_REGEX, "")
+    .replace(/(?:\r?\n)+$/, "")
+    .trim();
+}
+
+function getDcpStorageDir() {
+  return env("OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR", DEFAULT_DCP_STORAGE_DIR);
+}
+
+function loadDcpState(sessionID) {
+  if (!envBool("OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP", true)) return undefined;
+  if (!sessionID) return undefined;
+
+  const storageDir = getDcpStorageDir();
+  if (!storageDir) return undefined;
+
+  try {
+    const state = JSON.parse(readFileSync(`${storageDir}/${sessionID}.json`, "utf8"));
+    const messagesState = state?.prune?.messages;
+    if (!messagesState || typeof messagesState !== "object") return undefined;
+    return messagesState;
+  } catch {
+    return undefined;
+  }
+}
+
+function createSyntheticDcpSummaryMessage(baseMessage, anchorMessage, summary, blockId) {
+  const source = baseMessage?.info?.sessionID ? baseMessage : anchorMessage;
+  const sessionID = source?.info?.sessionID || anchorMessage?.info?.sessionID;
+  const messageID = `msg_dcp_summary_${blockId}_${anchorMessage?.info?.id || "anchor"}`;
+
+  return {
+    info: {
+      id: messageID,
+      sessionID,
+      role: "user",
+      agent: source?.info?.agent,
+      model: source?.info?.model,
+      time: {
+        created: source?.info?.time?.created ?? anchorMessage?.info?.time?.created ?? Date.now(),
+      },
+    },
+    parts: [
+      {
+        id: `prt_dcp_summary_${blockId}_${anchorMessage?.info?.id || "anchor"}`,
+        sessionID,
+        messageID,
+        type: "text",
+        text: summary,
+      },
+    ],
+    meta: {
+      syntheticDcpSummary: true,
+      dcpBlockId: blockId,
+    },
+  };
+}
+
+function applyDcpInterop(messages, dcpState, sourceHistory = messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+  if (!dcpState || typeof dcpState !== "object") return messages;
+
+  const blocksById = dcpState.blocksById;
+  const byMessageId = dcpState.byMessageId;
+
+  if (
+    !blocksById ||
+    typeof blocksById !== "object" ||
+    !byMessageId ||
+    typeof byMessageId !== "object"
+  ) {
+    return messages;
+  }
+
+  const sourceMessages = Array.isArray(sourceHistory) && sourceHistory.length ? sourceHistory : messages;
+  const sourceIndexByMessageId = new Map(
+    sourceMessages
+      .map((message, index) => [message?.info?.id, index])
+      .filter(([messageID]) => Boolean(messageID)),
+  );
+
+  const relevantBlockIds = new Set();
+  for (const message of messages) {
+    const entry = byMessageId[message?.info?.id];
+    for (const blockId of entry?.activeBlockIds ?? []) {
+      if (Number.isInteger(blockId) && blockId > 0 && blocksById[String(blockId)]?.active === true) {
+        relevantBlockIds.add(blockId);
+      }
+    }
+  }
+
+  if (relevantBlockIds.size === 0) return messages;
+
+  const result = [];
+  const injectedBlockIds = new Set();
+
+  for (const message of messages) {
+    const messageID = message?.info?.id;
+    if (!messageID) {
+      result.push(message);
+      continue;
+    }
+
+    const coveringBlockIds = (byMessageId[messageID]?.activeBlockIds ?? []).filter(
+      (blockId) => Number.isInteger(blockId) && relevantBlockIds.has(blockId),
+    );
+
+    for (const blockId of coveringBlockIds) {
+      if (injectedBlockIds.has(blockId)) continue;
+
+      const summary = normalizeDcpSummary(blocksById[String(blockId)]?.summary);
+      if (!summary) continue;
+
+      const sourceIndex = sourceIndexByMessageId.get(messageID);
+      const baseUserMessage = findLastUserMessage(sourceMessages, sourceIndex);
+      result.push(createSyntheticDcpSummaryMessage(baseUserMessage, message, summary, blockId));
+      injectedBlockIds.add(blockId);
+    }
+
+    if (coveringBlockIds.length > 0) {
+      continue;
+    }
+
+    result.push(message);
+  }
+
+  return result;
 }
 
 function toResponseInput(message, text) {
@@ -731,6 +894,7 @@ async function computeNativeSummary({ client, sessionID }) {
 
   const tailTurns = envInt("OPENCODE_NATIVE_COMPACTION_TAIL_TURNS", DEFAULT_TAIL_TURNS);
   const head = selectHead(visibleHistory, tailTurns);
+  const dcpAwareHead = applyDcpInterop(head, loadDcpState(sessionID), visibleHistory);
 
   const renderOptions = {
     toolOutputMaxChars: envInt("OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS", DEFAULT_TOOL_OUTPUT_MAX_CHARS),
@@ -738,7 +902,7 @@ async function computeNativeSummary({ client, sessionID }) {
     includeSnapshots: envBool("OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS", false),
   };
 
-  const inputItems = head
+  const inputItems = dcpAwareHead
     .map((message) => {
       const text = renderMessage(message, renderOptions);
       return text ? toResponseInput(message, text) : undefined;
@@ -870,8 +1034,12 @@ export const __test = {
   normalizeBaseUrl,
   normalizeCompactedWindow,
   OpenAIRequestError,
+  applyDcpInterop,
   errorMetadata,
   isRetryableStatus,
+  isSyntheticDcpSummaryMessage,
+  loadDcpState,
+  normalizeDcpSummary,
   openaiRequest,
   parseApiKey,
   parseRetryAfterMs,

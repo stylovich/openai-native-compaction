@@ -89,6 +89,14 @@ test("normalizeCompactedWindow rewrites assistant input_text parts to output_tex
   assert.equal(normalized[2].encrypted_content, "opaque_compaction_blob");
 });
 
+test("normalizeDcpSummary strips DCP headers and trailing block metadata tags", () => {
+  const summary = __test.normalizeDcpSummary(
+    "[Compressed conversation section]\nResumen persistido por DCP.\n\n<dcp-message-id>b12</dcp-message-id>",
+  );
+
+  assert.equal(summary, "Resumen persistido por DCP.");
+});
+
 test("completedCompactions and latestCompletedCompaction recover the last stored summary", () => {
   const messages = readFixture("session-with-compaction.json");
   const completed = __test.completedCompactions(messages);
@@ -116,6 +124,61 @@ test("selectHead keeps older turns and preserves the last N turns outside the he
   assert.deepEqual(
     head.map((message) => message.info.id),
     ["msg_user_1", "msg_assistant_1", "msg_compact_trigger", "msg_compact_summary"],
+  );
+});
+
+test("applyDcpInterop injects active DCP summaries and skips covered raw messages", () => {
+  const fullHistory = readFixture("session-with-dcp.json");
+  const dcpState = readFixture("dcp-session-state.json").prune.messages;
+  const head = fullHistory.slice(0, 2);
+
+  const transformed = __test.applyDcpInterop(head, dcpState, fullHistory);
+
+  assert.deepEqual(
+    transformed.map((message) => message.info.id),
+    ["msg_dcp_summary_1_msg_user_1"],
+  );
+  assert.equal(transformed[0].info.role, "user");
+  assert.equal(transformed[0].meta.syntheticDcpSummary, true);
+  assert.match(
+    transformed[0].parts[0].text,
+    /DCP guarda el estado en .*storage\/plugin\/dcp/,
+  );
+  assert.doesNotMatch(transformed[0].parts[0].text, /<dcp-message-id>/);
+});
+
+test("selectHead ignores synthetic DCP summaries when preserving the last user turns", () => {
+  const synthetic = {
+    info: { id: "msg_dcp_summary_1_msg_assistant_2", role: "user" },
+    parts: [{ type: "text", text: "Resumen DCP" }],
+    meta: { syntheticDcpSummary: true },
+  };
+
+  const messages = [
+    {
+      info: { id: "msg_user_1", role: "user" },
+      parts: [{ type: "text", text: "Turno viejo" }],
+    },
+    {
+      info: { id: "msg_assistant_1", role: "assistant" },
+      parts: [{ type: "text", text: "Respuesta vieja" }],
+    },
+    {
+      info: { id: "msg_user_2", role: "user" },
+      parts: [{ type: "text", text: "Último turno real" }],
+    },
+    synthetic,
+    {
+      info: { id: "msg_assistant_2", role: "assistant" },
+      parts: [{ type: "text", text: "Seguimiento" }],
+    },
+  ];
+
+  const head = __test.selectHead(messages, 1);
+
+  assert.deepEqual(
+    head.map((message) => message.info.id),
+    ["msg_user_1", "msg_assistant_1"],
   );
 });
 
@@ -345,6 +408,75 @@ test("computeNativeSummary serializes tool-heavy history with truncation and pre
     else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = previousReasoning;
     if (previousSnapshots === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS;
     else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS = previousSnapshots;
+  }
+});
+
+test("computeNativeSummary reuses active DCP summaries from persisted plugin state", async () => {
+  const messages = readFixture("session-with-dcp.json");
+  const compactResponse = readFixture("compact-response.json");
+  const summaryResponse = readFixture("summary-response.json");
+  const requests = [];
+
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+  const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+  const previousDcpStorageDir = process.env.OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR;
+  const previousDcpInterop = process.env.OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP;
+
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "1";
+  process.env.OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR = join(here, "fixtures", "dcp-storage");
+  process.env.OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP = "1";
+
+  globalThis.fetch = async (url, options) => {
+    requests.push({
+      url,
+      body: JSON.parse(String(options.body)),
+    });
+
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify(requests.length === 1 ? compactResponse : summaryResponse);
+      },
+    };
+  };
+
+  try {
+    await __test.computeNativeSummary({
+      client: {
+        session: {
+          messages: async () => ({ data: messages }),
+        },
+      },
+      sessionID: "ses_dcp",
+      dumpRun: undefined,
+    });
+
+    assert.equal(requests[0].body.input.length, 1);
+    assert.equal(requests[0].body.input[0].role, "user");
+    assert.match(requests[0].body.input[0].content, /DCP guarda el estado en .*storage\/plugin\/dcp/);
+    assert.doesNotMatch(requests[0].body.input[0].content, /Analiza el auth legado/);
+    assert.doesNotMatch(requests[0].body.input[0].content, /<dcp-message-id>/);
+  } finally {
+    globalThis.fetch = previousFetch;
+
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+    if (previousModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MODEL = previousModel;
+    if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+    if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
+    if (previousDcpStorageDir === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR;
+    else process.env.OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR = previousDcpStorageDir;
+    if (previousDcpInterop === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP;
+    else process.env.OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP = previousDcpInterop;
   }
 });
 

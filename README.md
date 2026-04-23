@@ -132,6 +132,7 @@ export OPENCODE_NATIVE_COMPACTION_MAX_RETRIES="${OPENCODE_NATIVE_COMPACTION_MAX_
 export OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS="${OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS:-750}"
 export OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING="${OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING:-0}"
 export OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS="${OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS:-0}"
+export OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP="${OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP:-1}"
 export OPENCODE_NATIVE_COMPACTION_DEBUG="${OPENCODE_NATIVE_COMPACTION_DEBUG:-1}"
 ```
 
@@ -141,6 +142,7 @@ Optional extras:
 export OPENCODE_NATIVE_COMPACTION_BASE_URL="https://api.openai.com/v1"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENCODE_NATIVE_COMPACTION_AUTH_FILE="$HOME/.local/share/opencode/auth.json"
+export OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR="$HOME/.local/share/opencode/storage/plugin/dcp"
 ```
 
 ## Runtime Behavior
@@ -154,6 +156,9 @@ export OPENCODE_NATIVE_COMPACTION_AUTH_FILE="$HOME/.local/share/opencode/auth.js
   instead of breaking the session.
 - Fallback logs include structured metadata such as `code`, `status`,
   `retryable`, `attempt`, and `path`.
+- When DCP state is present, the plugin reuses active DCP summaries from
+  `~/.local/share/opencode/storage/plugin/dcp/<sessionId>.json` and compacts the
+  normalized summary instead of the covered raw messages.
 
 ## OpenChamber / VS Code
 
@@ -222,6 +227,7 @@ Current coverage includes:
 - fallback and edge cases such as empty compact output
 - tool-heavy fixtures with long tool outputs, prior summaries, and optional
   reasoning/snapshot inclusion
+- DCP interop replays using persisted `storage/plugin/dcp` state
 - HTTP/runtime behavior for `429`, `403`, timeout, and raw/JSON error bodies
 
 GitHub Actions runs the same `npm run check` command on `push` to `main` and on

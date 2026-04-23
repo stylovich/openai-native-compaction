@@ -1,0 +1,66 @@
+[
+  {
+    "info": {
+      "id": "msg_user_1",
+      "sessionID": "ses_dcp",
+      "role": "user",
+      "time": {
+        "created": 1000
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Analiza el auth legado."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_1",
+      "sessionID": "ses_dcp",
+      "role": "assistant",
+      "time": {
+        "created": 2000
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Revisé auth y router antiguos."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user_2",
+      "sessionID": "ses_dcp",
+      "role": "user",
+      "time": {
+        "created": 3000
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Ahora céntrate en la integración con DCP."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_2",
+      "sessionID": "ses_dcp",
+      "role": "assistant",
+      "time": {
+        "created": 4000
+      }
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Estoy revisando la persistencia del plugin."
+      }
+    ]
+  }
+]
