@@ -1118,7 +1118,9 @@ async function computeNativeSummary({ client, sessionID }) {
   return summary.trim();
 }
 
-export const OpenAINativeCompactionPlugin = async ({ client }) => {
+export const PLUGIN_ID = "openai-native-compaction";
+
+export const server = async ({ client }) => {
   let warnedMissingKey = false;
 
   await safeLog(client, "info", "PLUGIN_INITIALIZED_OPENAI_NATIVE_COMPACTION OpenAI-native compaction plugin initialized.");
@@ -1167,6 +1169,11 @@ export const OpenAINativeCompactionPlugin = async ({ client }) => {
       }
     },
   };
+};
+
+export const OpenAINativeCompactionPlugin = {
+  id: PLUGIN_ID,
+  server,
 };
 
 export default OpenAINativeCompactionPlugin;

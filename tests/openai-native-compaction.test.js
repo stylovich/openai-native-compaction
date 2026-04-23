@@ -18,7 +18,9 @@ test("normalizeBaseUrl appends v1 and trims trailing slashes", () => {
 });
 
 test("plugin module exposes a default plugin factory export", () => {
-  assert.equal(typeof OpenAINativeCompactionPlugin, "function");
+  assert.equal(typeof OpenAINativeCompactionPlugin, "object");
+  assert.equal(OpenAINativeCompactionPlugin.id, "openai-native-compaction");
+  assert.equal(typeof OpenAINativeCompactionPlugin.server, "function");
 });
 
 test("parseApiKey supports raw and assignment formats", () => {
