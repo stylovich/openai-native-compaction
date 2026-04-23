@@ -1,0 +1,9 @@
+{
+  "name": "opencode-native-compaction",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check openai-native-compaction.js && node --test",
+    "test": "node --test"
+  }
+}

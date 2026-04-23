@@ -622,3 +622,17 @@ export const OpenAINativeCompactionPlugin = async ({ client }) => {
     },
   };
 };
+
+export const __test = {
+  SUMMARY_TEMPLATE,
+  buildSummaryPrompt,
+  completedCompactions,
+  computeNativeSummary,
+  dropPendingCompactionTail,
+  extractResponseText,
+  latestCompletedCompaction,
+  normalizeBaseUrl,
+  normalizeCompactedWindow,
+  parseApiKey,
+  selectHead,
+};

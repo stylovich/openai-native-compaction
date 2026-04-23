@@ -1,0 +1,114 @@
+[
+  {
+    "info": {
+      "id": "msg_user_1",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "¿Qué hace este proyecto?"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_1",
+      "parentID": "msg_user_1",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Es un sistema interno."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_compact_trigger",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "compaction"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_compact_summary",
+      "parentID": "msg_compact_trigger",
+      "role": "assistant",
+      "summary": true,
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "## Goal\n\n- Explicar el proyecto.\n\n## Discoveries\n\n- Hallazgo inicial."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user_2",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Ahora dime cómo se conecta al backend."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_2",
+      "parentID": "msg_user_2",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Se conecta por HTTP."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user_3",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "¿Y qué stack usa?"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_3",
+      "parentID": "msg_user_3",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Usa Node y OpenCode."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_pending_compaction",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "compaction"
+      }
+    ]
+  }
+]

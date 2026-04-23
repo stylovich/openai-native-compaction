@@ -1,0 +1,17 @@
+{
+  "id": "resp_summary_test",
+  "object": "response",
+  "status": "completed",
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "## Goal\n\n- Explicar el repo."
+        }
+      ]
+    }
+  ]
+}

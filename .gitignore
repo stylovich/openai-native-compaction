@@ -1,0 +1,4 @@
+# Local-only debug and replay artifacts
+debug/
+tmp/
+tests/fixtures/local/
