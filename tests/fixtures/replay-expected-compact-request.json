@@ -1,0 +1,15 @@
+{
+  "model": "gpt-5.4",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": "¿Qué hace este proyecto?"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Es un sistema interno."
+    }
+  ]
+}

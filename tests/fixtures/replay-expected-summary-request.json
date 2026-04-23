@@ -1,0 +1,36 @@
+{
+  "model": "gpt-5.4-mini",
+  "store": false,
+  "instructions": "You are writing a continuation summary for OpenCode compaction. Output only the requested Markdown and nothing else.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Resume esta conversación."
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Resumen técnico intermedio."
+        }
+      ]
+    },
+    {
+      "type": "compaction",
+      "encrypted_content": "opaque_compaction_blob"
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Update the anchored summary below using the conversation history already carried in the compacted context.\nPreserve still-true details, remove stale details, and merge in the new facts.\n<previous-summary>\n## Goal\n\n- Explicar el proyecto.\n\n## Discoveries\n\n- Hallazgo inicial.\n</previous-summary>\n\nOutput exactly this Markdown structure and keep the section order unchanged:\n\n---\n## Goal\n\n- [single-sentence current objective]\n\n## Active User Preferences & Constraints\n\n- [durable user preferences, constraints, specs, language/style requirements, or \"(none)\"]\n\n## Progress\n\n### Done\n\n- [completed work or \"(none)\"]\n\n### In Progress\n\n- [current work or \"(none)\"]\n\n### Blocked\n\n- [blockers or \"(none)\"]\n\n## Discoveries\n\n- [important factual findings from the repo, API, tools, errors, data, or \"(none)\"]\n\n## Key Decisions\n\n- [decision and why, or \"(none)\"]\n\n## Next Steps\n\n- [ordered next actions or \"(none)\"]\n\n## Critical Context\n\n- [important technical facts, errors, open questions, or \"(none)\"]\n\n## Relevant Files\n\n- [file or directory path: why it matters, or \"(none)\"]\n\n---\n\nRules:\n\n- Keep every section, even when empty.\n- Use terse bullets, not prose paragraphs.\n- Preserve exact file paths, commands, error strings, and identifiers when known.\n- Treat Active User Preferences & Constraints as durable guidance only; do not copy temporary summary or compaction instructions as active preferences.\n- Put factual findings in Discoveries; put continuation-critical state in Critical Context; avoid duplicating long lists across both.\n- Do not mention the summary process or that context was compacted."
+    }
+  ]
+}

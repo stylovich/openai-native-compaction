@@ -106,6 +106,8 @@ test("computeNativeSummary replays compact -> responses using the sanitized fixt
   const messages = readFixture("session-with-compaction.json").slice(0, 8);
   const compactResponse = readFixture("compact-response.json");
   const summaryResponse = readFixture("summary-response.json");
+  const expectedCompactRequest = readFixture("replay-expected-compact-request.json");
+  const expectedSummaryRequest = readFixture("replay-expected-summary-request.json");
   const requests = [];
 
   const previousFetch = globalThis.fetch;
@@ -151,22 +153,9 @@ test("computeNativeSummary replays compact -> responses using the sanitized fixt
     assert.equal(requests.length, 2);
     assert.equal(requests[0].url, "https://api.openai.com/v1/responses/compact");
     assert.equal(requests[0].authorization, "Bearer sk-test");
-    assert.equal(requests[0].body.model, "gpt-5.4");
-    assert.equal(requests[0].body.input.length, 2);
-    assert.deepEqual(
-      requests[0].body.input.map((item) => item.role),
-      ["user", "assistant"],
-    );
+    assert.deepEqual(requests[0].body, expectedCompactRequest);
     assert.equal(requests[1].url, "https://api.openai.com/v1/responses");
-    assert.equal(requests[1].body.model, "gpt-5.4-mini");
-    assert.equal(requests[1].body.input[0].role, "user");
-    assert.equal(requests[1].body.input[1].role, "assistant");
-    assert.equal(requests[1].body.input[1].content[0].type, "output_text");
-    assert.equal(requests[1].body.input[2].type, "compaction");
-    assert.equal(requests[1].body.input.at(-1).role, "user");
-    assert.match(requests[1].body.input.at(-1).content, /## Active User Preferences & Constraints/);
-    assert.match(requests[1].body.input.at(-1).content, /## Discoveries/);
-    assert.match(requests[1].body.input.at(-1).content, /<previous-summary>/);
+    assert.deepEqual(requests[1].body, expectedSummaryRequest);
   } finally {
     globalThis.fetch = previousFetch;
 
@@ -343,6 +332,35 @@ test("openaiRequest falls back to raw text when the error body is not JSON", asy
           timeoutMs: 1000,
         }),
       /upstream exploded/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("openaiRequest aborts with a timeout error when fetch never resolves", async () => {
+  const previousFetch = globalThis.fetch;
+
+  globalThis.fetch = async (_url, options) =>
+    await new Promise((_, reject) => {
+      options.signal.addEventListener(
+        "abort",
+        () => reject(options.signal.reason ?? new Error("aborted")),
+        { once: true },
+      );
+    });
+
+  try {
+    await assert.rejects(
+      () =>
+        __test.openaiRequest({
+          apiKey: "sk-test",
+          baseUrl: "https://api.openai.com/v1",
+          path: "/responses",
+          body: { model: "gpt-5.4" },
+          timeoutMs: 10,
+        }),
+      /Timed out calling \/responses/,
     );
   } finally {
     globalThis.fetch = previousFetch;
