@@ -7,6 +7,15 @@ summarizer prompt.
 It is intended for local OpenCode/OpenChamber usage, including VS Code setups
 where OpenChamber starts and manages the OpenCode server.
 
+## Current Status
+
+The repo currently includes:
+
+- the production plugin in `openai-native-compaction.js`
+- fixture-based replay tests under `tests/`
+- a minimal CI workflow that runs syntax + tests on GitHub Actions
+- conservative runtime hardening for retries, timeouts, and fallback logging
+
 ## What It Does
 
 1. Reads the current session through the OpenCode SDK.
@@ -17,6 +26,17 @@ where OpenChamber starts and manages the OpenCode server.
    OpenCode-compatible anchored summary.
 6. Replaces OpenCode's compaction prompt with that summary.
 
+The current summary template is optimized for continuity after compaction:
+
+- `Goal`
+- `Active User Preferences & Constraints`
+- `Progress`
+- `Discoveries`
+- `Key Decisions`
+- `Next Steps`
+- `Critical Context`
+- `Relevant Files`
+
 ## Limitation
 
 OpenCode plugins can replace the compaction prompt, but they cannot replace
@@ -25,9 +45,13 @@ So the plugin does not store OpenAI's encrypted compaction object inside
 OpenCode's session store. It uses native compaction to produce the summary text
 that OpenCode stores.
 
-## Files
+## Repo Layout
 
 - `openai-native-compaction.js`: the plugin.
+- `package.json`: local test/check scripts.
+- `tests/openai-native-compaction.test.js`: unit + replay tests.
+- `tests/fixtures/`: sanitized replay fixtures and expected request bodies.
+- `.github/workflows/ci.yml`: GitHub Actions workflow for `npm run check`.
 - `scripts/install-global.sh`: copies the plugin and wrapper into the expected
   local OpenCode/OpenChamber locations.
 - `scripts/opencode-openchamber.example`: wrapper used by OpenChamber to start
@@ -95,7 +119,7 @@ normal OpenAI API key.
 
 ## Environment Variables
 
-These are the defaults used by the wrapper:
+Main settings:
 
 ```bash
 export OPENCODE_NATIVE_COMPACTION_MODEL="${OPENCODE_NATIVE_COMPACTION_MODEL:-gpt-5.4}"
@@ -104,6 +128,8 @@ export OPENCODE_NATIVE_COMPACTION_API_KEY_FILE="${OPENCODE_NATIVE_COMPACTION_API
 export OPENCODE_NATIVE_COMPACTION_TAIL_TURNS="${OPENCODE_NATIVE_COMPACTION_TAIL_TURNS:-2}"
 export OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS="${OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS:-6000}"
 export OPENCODE_NATIVE_COMPACTION_TIMEOUT_MS="${OPENCODE_NATIVE_COMPACTION_TIMEOUT_MS:-120000}"
+export OPENCODE_NATIVE_COMPACTION_MAX_RETRIES="${OPENCODE_NATIVE_COMPACTION_MAX_RETRIES:-1}"
+export OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS="${OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS:-750}"
 export OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING="${OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING:-0}"
 export OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS="${OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS:-0}"
 export OPENCODE_NATIVE_COMPACTION_DEBUG="${OPENCODE_NATIVE_COMPACTION_DEBUG:-1}"
@@ -116,6 +142,18 @@ export OPENCODE_NATIVE_COMPACTION_BASE_URL="https://api.openai.com/v1"
 export OPENAI_BASE_URL="https://api.openai.com/v1"
 export OPENCODE_NATIVE_COMPACTION_AUTH_FILE="$HOME/.local/share/opencode/auth.json"
 ```
+
+## Runtime Behavior
+
+- The plugin retries transient OpenAI failures once by default.
+- Retryable statuses are `408`, `409`, `425`, `429`, `500`, `502`, `503`,
+  and `504`.
+- `401`, `403`, and other non-transient `4xx` responses are not retried.
+- `Retry-After` is respected when OpenAI returns it.
+- Timeout/network/API failures fall back to OpenCode's default compaction path
+  instead of breaking the session.
+- Fallback logs include structured metadata such as `code`, `status`,
+  `retryable`, `attempt`, and `path`.
 
 ## OpenChamber / VS Code
 
@@ -161,6 +199,33 @@ export OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL="gpt-5.4"
 export OPENCODE_NATIVE_COMPACTION_DEBUG="1"
 opencode
 ```
+
+## Testing
+
+Run the full local checks:
+
+```bash
+npm run check
+```
+
+Or only the test suite:
+
+```bash
+npm run test
+```
+
+Current coverage includes:
+
+- helper-level tests for URL normalization, API key parsing, retry parsing, and
+  response extraction
+- replay tests for `/responses/compact -> /responses`
+- fallback and edge cases such as empty compact output
+- tool-heavy fixtures with long tool outputs, prior summaries, and optional
+  reasoning/snapshot inclusion
+- HTTP/runtime behavior for `429`, `403`, timeout, and raw/JSON error bodies
+
+GitHub Actions runs the same `npm run check` command on `push` to `main` and on
+every `pull_request`.
 
 ## Verify It Worked
 
@@ -211,17 +276,18 @@ The OpenCode OAuth token does not have enough scope. Use an OpenAI API key in
 `Incorrect API key provided: OPENAI_A...`
 
 The key file was probably read as a literal `OPENAI_API_KEY=...` line by an old
-plugin version. Update the plugin; current versions parse assignment syntax.
+plugin version. Current versions parse assignment syntax.
 
 `Invalid value: 'input_text'. Supported values are: 'output_text' and 'refusal'.`
 
-Update the plugin. Current versions normalize assistant content returned by
-`/responses/compact` before sending it to `/responses`.
+Current versions normalize assistant content returned by `/responses/compact`
+before sending it to `/responses`. If you still see this, the installed plugin
+is stale.
 
 Only `PLUGIN_HOOK_ENTERED` appears
 
-Use the current plugin version. Older logs used an invalid `warning` level, so
-fallback logs could fail silently.
+The hook ran, but the native summary path did not complete. Check for
+`PLUGIN_FALLBACK`, `PLUGIN_NO_AUTH`, or `PLUGIN_NO_SUMMARY` in the same log.
 
 No recent logs appear
 
