@@ -24,6 +24,23 @@ test("parseApiKey supports raw and assignment formats", () => {
   assert.equal(__test.parseApiKey("# comment only\n\n"), "");
 });
 
+test("parseRetryAfterMs supports seconds and HTTP dates", () => {
+  assert.equal(__test.parseRetryAfterMs("1.5"), 1500);
+
+  const future = new Date(Date.now() + 2000).toUTCString();
+  const parsed = __test.parseRetryAfterMs(future);
+
+  assert.ok(parsed >= 0);
+  assert.ok(parsed <= 30_000);
+});
+
+test("isRetryableStatus marks only transient HTTP classes as retryable", () => {
+  assert.equal(__test.isRetryableStatus(401), false);
+  assert.equal(__test.isRetryableStatus(403), false);
+  assert.equal(__test.isRetryableStatus(429), true);
+  assert.equal(__test.isRetryableStatus(503), true);
+});
+
 test("buildSummaryPrompt includes the new durable-preferences and discoveries sections", () => {
   const prompt = __test.buildSummaryPrompt("## Goal\n\n- Previous summary.");
 
@@ -280,7 +297,9 @@ test("openaiRequest returns parsed JSON on success", async () => {
 
 test("openaiRequest surfaces JSON API errors", async () => {
   const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
 
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "0";
   globalThis.fetch = async () => ({
     ok: false,
     status: 429,
@@ -307,12 +326,16 @@ test("openaiRequest surfaces JSON API errors", async () => {
     );
   } finally {
     globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
   }
 });
 
 test("openaiRequest falls back to raw text when the error body is not JSON", async () => {
   const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
 
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "0";
   globalThis.fetch = async () => ({
     ok: false,
     status: 500,
@@ -335,12 +358,16 @@ test("openaiRequest falls back to raw text when the error body is not JSON", asy
     );
   } finally {
     globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
   }
 });
 
 test("openaiRequest aborts with a timeout error when fetch never resolves", async () => {
   const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
 
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "0";
   globalThis.fetch = async (_url, options) =>
     await new Promise((_, reject) => {
       options.signal.addEventListener(
@@ -364,5 +391,116 @@ test("openaiRequest aborts with a timeout error when fetch never resolves", asyn
     );
   } finally {
     globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
+  }
+});
+
+test("openaiRequest retries once on 429 and then succeeds", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+  const previousRetryBase = process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS;
+  let attempts = 0;
+
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "1";
+  process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS = "0";
+
+  globalThis.fetch = async () => {
+    attempts += 1;
+
+    if (attempts === 1) {
+      return {
+        ok: false,
+        status: 429,
+        headers: { get: () => "0" },
+        async text() {
+          return JSON.stringify({ error: { message: "Rate limit exceeded" } });
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({ ok: true });
+      },
+    };
+  };
+
+  try {
+    const response = await __test.openaiRequest({
+      apiKey: "sk-test",
+      baseUrl: "https://api.openai.com/v1",
+      path: "/responses",
+      body: { model: "gpt-5.4" },
+      timeoutMs: 1000,
+    });
+
+    assert.equal(attempts, 2);
+    assert.deepEqual(response, { ok: true });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
+    if (previousRetryBase === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS = previousRetryBase;
+  }
+});
+
+test("openaiRequest does not retry 403 missing-scope errors and preserves structured metadata", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+  let attempts = 0;
+
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "1";
+
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return {
+      ok: false,
+      status: 403,
+      headers: { get: () => null },
+      async text() {
+        return JSON.stringify({
+          error: {
+            message: "You have insufficient permissions for this operation. Missing scopes: api.responses.write.",
+          },
+        });
+      },
+    };
+  };
+
+  try {
+    await assert.rejects(
+      async () => {
+        try {
+          await __test.openaiRequest({
+            apiKey: "sk-test",
+            baseUrl: "https://api.openai.com/v1",
+            path: "/responses/compact",
+            body: { model: "gpt-5.4" },
+            timeoutMs: 1000,
+          });
+        } catch (error) {
+          assert.equal(error instanceof __test.OpenAIRequestError, true);
+          assert.equal(error.retryable, false);
+          assert.equal(error.status, 403);
+          assert.equal(error.code, "http_403");
+
+          const metadata = __test.errorMetadata(error);
+          assert.equal(metadata.retryable, false);
+          assert.equal(metadata.status, 403);
+          assert.equal(metadata.path, "/responses/compact");
+          throw error;
+        }
+      },
+      /Missing scopes: api\.responses\.write/,
+    );
+
+    assert.equal(attempts, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
   }
 });

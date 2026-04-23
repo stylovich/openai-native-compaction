@@ -4,6 +4,8 @@ const SERVICE = "openai-native-compaction";
 const DEFAULT_MODEL = "gpt-5.4";
 const DEFAULT_TAIL_TURNS = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_RETRIES = 1;
+const DEFAULT_RETRY_BASE_MS = 750;
 const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 6_000;
 const DEFAULT_API_KEY_FILE = `${process.env.HOME || ""}/.config/opencode/openai-native-compaction.key`;
 const DEFAULT_OPENCODE_AUTH_PATH = `${process.env.HOME || ""}/.local/share/opencode/auth.json`;
@@ -91,6 +93,181 @@ function unwrap(result) {
 function normalizeBaseUrl(url) {
   const trimmed = (url || "https://api.openai.com/v1").replace(/\/+$/, "");
   return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+}
+
+class OpenAIRequestError extends Error {
+  constructor({
+    message,
+    path,
+    status,
+    code,
+    retryable,
+    attempt,
+    maxAttempts,
+    retryAfterMs,
+    cause,
+  }) {
+    super(message, cause ? { cause } : undefined);
+    this.name = "OpenAIRequestError";
+    this.path = path;
+    this.status = status ?? null;
+    this.code = code || "unknown_error";
+    this.retryable = Boolean(retryable);
+    this.attempt = attempt ?? 1;
+    this.maxAttempts = maxAttempts ?? 1;
+    this.retryAfterMs = retryAfterMs ?? null;
+  }
+}
+
+function sleep(ms) {
+  if (!ms || ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(value) {
+  if (!value) return undefined;
+
+  const seconds = Number.parseFloat(String(value).trim());
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(Math.round(seconds * 1000), 30_000);
+  }
+
+  const dateMs = Date.parse(String(value));
+  if (Number.isFinite(dateMs)) {
+    return Math.min(Math.max(0, dateMs - Date.now()), 30_000);
+  }
+
+  return undefined;
+}
+
+function defaultRetryDelayMs(attempt) {
+  const baseMs = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS", DEFAULT_RETRY_BASE_MS));
+  return Math.min(baseMs * 2 ** Math.max(0, attempt - 1), 10_000);
+}
+
+function isRetryableStatus(status) {
+  return [408, 409, 425, 429, 500, 502, 503, 504].includes(status);
+}
+
+function httpStatusLabel(status) {
+  const labels = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    408: "Request Timeout",
+    409: "Conflict",
+    422: "Unprocessable Entity",
+    425: "Too Early",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Timeout",
+  };
+
+  return labels[status] || "HTTP Error";
+}
+
+function isAbortTimeoutError(error) {
+  if (!error) return false;
+  if (error.name === "AbortError") return true;
+  if (typeof error.message === "string" && error.message.includes("Timed out calling")) return true;
+  return false;
+}
+
+function createOpenAITransportError({ path, attempt, maxAttempts, timeoutMs, error }) {
+  if (error instanceof OpenAIRequestError) return error;
+
+  if (isAbortTimeoutError(error)) {
+    return new OpenAIRequestError({
+      message: `Timed out calling ${path} after ${timeoutMs}ms`,
+      path,
+      code: "timeout",
+      retryable: true,
+      attempt,
+      maxAttempts,
+      cause: error,
+    });
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new OpenAIRequestError({
+    message: `Network error calling ${path}: ${message}`,
+    path,
+    code: "network_error",
+    retryable: true,
+    attempt,
+    maxAttempts,
+    cause: error instanceof Error ? error : undefined,
+  });
+}
+
+function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, retryAfterMs }) {
+  const apiMessage =
+    typeof json?.error?.message === "string" && json.error.message.trim()
+      ? json.error.message.trim()
+      : typeof raw === "string" && raw.trim()
+        ? raw.trim()
+        : `${path} failed with HTTP ${status}`;
+
+  let message = apiMessage;
+  const retryable = isRetryableStatus(status);
+
+  if (status === 401) {
+    message = `${path} failed with HTTP 401 Unauthorized. Verify the configured OpenAI API key or auth token.`;
+  } else if (status === 403 && /Missing scopes:/i.test(apiMessage)) {
+    message = `${path} failed with HTTP 403 Forbidden. ${apiMessage}`;
+  } else if (status === 403) {
+    message = `${path} failed with HTTP 403 Forbidden. Check model access, org/project permissions, or API key scopes.`;
+  } else if (status === 429) {
+    const retryHint = retryAfterMs ? ` Retry-After=${retryAfterMs}ms.` : "";
+    message = `${path} failed with HTTP 429 Too Many Requests.${retryHint} ${apiMessage}`.trim();
+  } else if (status >= 500) {
+    message = `${path} failed with HTTP ${status} ${httpStatusLabel(status)}. ${apiMessage}`.trim();
+  } else if (!apiMessage.startsWith(path)) {
+    message = `${path} failed with HTTP ${status} ${httpStatusLabel(status)}. ${apiMessage}`.trim();
+  }
+
+  return new OpenAIRequestError({
+    message,
+    path,
+    status,
+    code: `http_${status}`,
+    retryable,
+    attempt,
+    maxAttempts,
+    retryAfterMs,
+  });
+}
+
+function createRuntimeError({ message, path, code, retryable = false, cause }) {
+  return new OpenAIRequestError({
+    message,
+    path,
+    code,
+    retryable,
+    cause,
+  });
+}
+
+function errorMetadata(error) {
+  if (error instanceof OpenAIRequestError) {
+    return {
+      code: error.code,
+      path: error.path,
+      status: error.status,
+      retryable: error.retryable,
+      attempt: error.attempt,
+      maxAttempts: error.maxAttempts,
+      retryAfterMs: error.retryAfterMs,
+      error: error.message,
+    };
+  }
+
+  return {
+    error: error instanceof Error ? error.message : String(error),
+  };
 }
 
 async function safeLog(client, level, message, metadata) {
@@ -369,38 +546,74 @@ function buildEchoPrompt(summary) {
 }
 
 async function openaiRequest({ apiKey, baseUrl, path, body, timeoutMs }) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new Error(`Timed out calling ${path}`)), timeoutMs);
+  const maxRetries = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_MAX_RETRIES", DEFAULT_MAX_RETRIES));
+  const maxAttempts = maxRetries + 1;
 
-  try {
-    const response = await fetch(`${baseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error(`Timed out calling ${path}`)), timeoutMs);
 
-    const raw = await response.text();
-    let json = {};
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-    if (raw) {
-      try {
-        json = JSON.parse(raw);
-      } catch {
-        json = { raw };
+      const raw = await response.text();
+      let json = {};
+
+      if (raw) {
+        try {
+          json = JSON.parse(raw);
+        } catch {
+          json = { raw };
+        }
       }
-    }
 
-    if (!response.ok) {
-      throw new Error(json?.error?.message || raw || `${path} failed with HTTP ${response.status}`);
-    }
+      if (!response.ok) {
+        const retryAfterMs = parseRetryAfterMs(response.headers?.get?.("retry-after"));
+        const error = createOpenAIHttpError({
+          path,
+          status: response.status,
+          raw,
+          json,
+          attempt,
+          maxAttempts,
+          retryAfterMs,
+        });
 
-    return json;
-  } finally {
-    clearTimeout(timer);
+        if (error.retryable && attempt < maxAttempts) {
+          await sleep(retryAfterMs ?? defaultRetryDelayMs(attempt));
+          continue;
+        }
+
+        throw error;
+      }
+
+      return json;
+    } catch (error) {
+      const normalized = createOpenAITransportError({
+        path,
+        attempt,
+        maxAttempts,
+        timeoutMs,
+        error,
+      });
+
+      if (normalized.retryable && attempt < maxAttempts) {
+        await sleep(defaultRetryDelayMs(attempt));
+        continue;
+      }
+
+      throw normalized;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 
@@ -555,7 +768,11 @@ async function computeNativeSummary({ client, sessionID }) {
 
   const compactedWindow = normalizeCompactedWindow(Array.isArray(compacted?.output) ? compacted.output : []);
   if (!compactedWindow.length) {
-    throw new Error("responses/compact returned no output window");
+    throw createRuntimeError({
+      message: "responses/compact returned no output window",
+      path: "/responses/compact",
+      code: "invalid_compact_output",
+    });
   }
 
   const summaryResponse = await openaiRequest({
@@ -581,7 +798,11 @@ async function computeNativeSummary({ client, sessionID }) {
 
   const summary = extractResponseText(summaryResponse);
   if (!summary) {
-    throw new Error("responses.create returned no summary text");
+    throw createRuntimeError({
+      message: "responses.create returned no summary text",
+      path: "/responses",
+      code: "empty_summary_text",
+    });
   }
 
   return summary.trim();
@@ -631,7 +852,7 @@ export const OpenAINativeCompactionPlugin = async ({ client }) => {
       } catch (error) {
         await safeLog(client, "warning", "PLUGIN_FALLBACK_OPENAI_NATIVE_COMPACTION OpenAI-native compaction failed; falling back to OpenCode's default compaction.", {
           sessionID: input.sessionID,
-          error: error instanceof Error ? error.message : String(error),
+          ...errorMetadata(error),
         });
       }
     },
@@ -648,7 +869,11 @@ export const __test = {
   latestCompletedCompaction,
   normalizeBaseUrl,
   normalizeCompactedWindow,
+  OpenAIRequestError,
+  errorMetadata,
+  isRetryableStatus,
   openaiRequest,
   parseApiKey,
+  parseRetryAfterMs,
   selectHead,
 };
