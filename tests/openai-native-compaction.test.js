@@ -44,6 +44,24 @@ test("extractResponseText prefers output_text and falls back to assistant conten
   assert.equal(__test.extractResponseText(response), "## Goal\n\n- Explicar el repo.");
 });
 
+test("extractResponseText also supports summary_text, text, and refusal parts", () => {
+  const response = {
+    output: [
+      {
+        type: "message",
+        role: "assistant",
+        content: [
+          { type: "summary_text", text: "Resumen. " },
+          { type: "text", text: "Texto. " },
+          { type: "refusal", refusal: "Negativa." },
+        ],
+      },
+    ],
+  };
+
+  assert.equal(__test.extractResponseText(response), "Resumen. Texto. Negativa.");
+});
+
 test("normalizeCompactedWindow rewrites assistant input_text parts to output_text", () => {
   const response = readFixture("compact-response.json");
   const normalized = __test.normalizeCompactedWindow(response.output);
@@ -243,5 +261,90 @@ test("computeNativeSummary throws when /responses/compact returns no output wind
     globalThis.fetch = previousFetch;
     if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+});
+
+test("openaiRequest returns parsed JSON on success", async () => {
+  const previousFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    async text() {
+      return JSON.stringify({ ok: true, nested: { value: 1 } });
+    },
+  });
+
+  try {
+    const response = await __test.openaiRequest({
+      apiKey: "sk-test",
+      baseUrl: "https://api.openai.com/v1",
+      path: "/responses",
+      body: { model: "gpt-5.4" },
+      timeoutMs: 1000,
+    });
+
+    assert.deepEqual(response, { ok: true, nested: { value: 1 } });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("openaiRequest surfaces JSON API errors", async () => {
+  const previousFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 429,
+    async text() {
+      return JSON.stringify({
+        error: {
+          message: "Rate limit exceeded",
+        },
+      });
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        __test.openaiRequest({
+          apiKey: "sk-test",
+          baseUrl: "https://api.openai.com/v1",
+          path: "/responses",
+          body: { model: "gpt-5.4" },
+          timeoutMs: 1000,
+        }),
+      /Rate limit exceeded/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("openaiRequest falls back to raw text when the error body is not JSON", async () => {
+  const previousFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 500,
+    async text() {
+      return "upstream exploded";
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        __test.openaiRequest({
+          apiKey: "sk-test",
+          baseUrl: "https://api.openai.com/v1",
+          path: "/responses/compact",
+          body: { model: "gpt-5.4" },
+          timeoutMs: 1000,
+        }),
+      /upstream exploded/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });

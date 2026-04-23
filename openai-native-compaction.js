@@ -633,6 +633,7 @@ export const __test = {
   latestCompletedCompaction,
   normalizeBaseUrl,
   normalizeCompactedWindow,
+  openaiRequest,
   parseApiKey,
   selectHead,
 };
