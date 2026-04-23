@@ -165,3 +165,83 @@ test("computeNativeSummary replays compact -> responses using the sanitized fixt
     else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
   }
 });
+
+test("computeNativeSummary returns the previous summary when there is no new visible input to compact", async () => {
+  const messages = [
+    {
+      info: { id: "msg_compact_trigger", role: "user" },
+      parts: [{ type: "compaction" }],
+    },
+    {
+      info: {
+        id: "msg_compact_summary",
+        parentID: "msg_compact_trigger",
+        role: "assistant",
+        summary: true,
+        finish: "stop",
+      },
+      parts: [{ type: "text", text: "## Goal\n\n- Summary already stored." }],
+    },
+    {
+      info: { id: "msg_pending_compaction", role: "user" },
+      parts: [{ type: "compaction" }],
+    },
+  ];
+
+  const previousFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = async () => {
+      throw new Error("fetch should not be called when there is no new input");
+    };
+
+    const summary = await __test.computeNativeSummary({
+      client: {
+        session: {
+          messages: async () => ({ data: messages }),
+        },
+      },
+      sessionID: "ses_empty",
+      dumpRun: undefined,
+    });
+
+    assert.equal(summary, "## Goal\n\n- Summary already stored.");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("computeNativeSummary throws when /responses/compact returns no output window", async () => {
+  const messages = readFixture("session-with-compaction.json").slice(0, 8);
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+
+  process.env.OPENAI_API_KEY = "sk-test";
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    async text() {
+      return JSON.stringify({ output: [] });
+    },
+  });
+
+  try {
+    await assert.rejects(
+      () =>
+        __test.computeNativeSummary({
+          client: {
+            session: {
+              messages: async () => ({ data: messages }),
+            },
+          },
+          sessionID: "ses_empty_compact",
+          dumpRun: undefined,
+        }),
+      /responses\/compact returned no output window/,
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+  }
+});
