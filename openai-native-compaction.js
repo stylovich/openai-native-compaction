@@ -158,6 +158,21 @@ function completedCompactions(messages) {
   return completed;
 }
 
+function latestCompletedCompaction(messages) {
+  const completed = completedCompactions(messages);
+  const latest = completed.at(-1);
+  if (!latest) return undefined;
+
+  return {
+    summary: latest.summary || "",
+    userIndex: latest.userIndex,
+    assistantIndex: latest.assistantIndex,
+    userMessage: messages[latest.userIndex]?.info,
+    assistantMessage: messages[latest.assistantIndex]?.info,
+    assistantParts: messages[latest.assistantIndex]?.parts,
+  };
+}
+
 function dropPendingCompactionTail(messages) {
   if (!messages.length) return messages;
   const last = messages[messages.length - 1];
