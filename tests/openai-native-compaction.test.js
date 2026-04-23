@@ -270,6 +270,157 @@ test("computeNativeSummary throws when /responses/compact returns no output wind
   }
 });
 
+test("computeNativeSummary serializes tool-heavy history with truncation and preserves a long previous summary anchor", async () => {
+  const messages = readFixture("session-with-tools-and-summary.json");
+  const compactResponse = readFixture("compact-response.json");
+  const summaryResponse = readFixture("summary-response.json");
+  const expectedCompactRequest = readFixture("replay-tools-expected-compact-request.json");
+  const requests = [];
+
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+  const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+  const previousToolChars = process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;
+  const previousReasoning = process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING;
+  const previousSnapshots = process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS;
+
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "2";
+  process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS = "80";
+  process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = "0";
+  process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS = "0";
+
+  globalThis.fetch = async (url, options) => {
+    requests.push({
+      url,
+      body: JSON.parse(String(options.body)),
+    });
+
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify(requests.length === 1 ? compactResponse : summaryResponse);
+      },
+    };
+  };
+
+  try {
+    await __test.computeNativeSummary({
+      client: {
+        session: {
+          messages: async () => ({ data: messages }),
+        },
+      },
+      sessionID: "ses_tools",
+      dumpRun: undefined,
+    });
+
+    assert.deepEqual(requests[0].body, expectedCompactRequest);
+    assert.equal(requests[0].body.input.length, 2);
+    assert.match(requests[0].body.input[1].content, /\[\.\.\.snip\.\.\.\]/);
+    assert.doesNotMatch(requests[0].body.input[1].content, /Esta cadena interna/);
+    assert.doesNotMatch(requests[0].body.input[1].content, /\[Snapshot\]/);
+
+    const summaryPrompt = requests[1].body.input.at(-1).content;
+    assert.match(summaryPrompt, /Hallazgo previo B: el frontend depende de un sistema de temas compartido/);
+    assert.match(summaryPrompt, /## Active User Preferences & Constraints/);
+  } finally {
+    globalThis.fetch = previousFetch;
+
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+    if (previousModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MODEL = previousModel;
+    if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+    if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
+    if (previousToolChars === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS = previousToolChars;
+    if (previousReasoning === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING;
+    else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = previousReasoning;
+    if (previousSnapshots === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS = previousSnapshots;
+  }
+});
+
+test("computeNativeSummary can include reasoning and snapshots when explicitly enabled", async () => {
+  const messages = readFixture("session-with-tools-and-summary.json");
+  const compactResponse = readFixture("compact-response.json");
+  const summaryResponse = readFixture("summary-response.json");
+  const requests = [];
+
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+  const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+  const previousToolChars = process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;
+  const previousReasoning = process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING;
+  const previousSnapshots = process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS;
+
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "2";
+  process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS = "80";
+  process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = "1";
+  process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS = "1";
+
+  globalThis.fetch = async (url, options) => {
+    requests.push({
+      url,
+      body: JSON.parse(String(options.body)),
+    });
+
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify(requests.length === 1 ? compactResponse : summaryResponse);
+      },
+    };
+  };
+
+  try {
+    await __test.computeNativeSummary({
+      client: {
+        session: {
+          messages: async () => ({ data: messages }),
+        },
+      },
+      sessionID: "ses_tools_verbose",
+      dumpRun: undefined,
+    });
+
+    const assistantContent = requests[0].body.input[1].content;
+    assert.match(assistantContent, /Esta cadena interna no debería aparecer/);
+    assert.match(assistantContent, /\[Snapshot\]/);
+    assert.match(assistantContent, /\[Tool error\]/);
+    assert.match(assistantContent, /\[\.\.\.snip\.\.\.\]/);
+  } finally {
+    globalThis.fetch = previousFetch;
+
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+    if (previousModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MODEL = previousModel;
+    if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+    if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
+    if (previousToolChars === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS = previousToolChars;
+    if (previousReasoning === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING;
+    else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = previousReasoning;
+    if (previousSnapshots === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS = previousSnapshots;
+  }
+});
+
 test("openaiRequest returns parsed JSON on success", async () => {
   const previousFetch = globalThis.fetch;
 

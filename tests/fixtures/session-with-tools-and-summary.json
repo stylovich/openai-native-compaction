@@ -1,0 +1,177 @@
+[
+  {
+    "info": {
+      "id": "msg_user_tools_1",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Inspecciona el repo y registra hallazgos técnicos."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_tools_1",
+      "parentID": "msg_user_tools_1",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "step-start"
+      },
+      {
+        "type": "text",
+        "text": "Inspeccioné el repositorio y ejecuté varias herramientas."
+      },
+      {
+        "type": "reasoning",
+        "text": "Esta cadena interna no debería aparecer salvo que se habilite explícitamente."
+      },
+      {
+        "type": "tool",
+        "tool": "rg",
+        "state": {
+          "status": "completed",
+          "title": "rg README",
+          "input": {
+            "pattern": "README|package.json",
+            "path": "/workspace/repo"
+          },
+          "output": "HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER HEADER TAIL TAIL TAIL TAIL TAIL TAIL TAIL TAIL TAIL TAIL TAIL"
+        }
+      },
+      {
+        "type": "tool",
+        "tool": "read-file",
+        "state": {
+          "status": "error",
+          "input": {
+            "path": "/workspace/repo/secret.env"
+          },
+          "error": "Permission denied"
+        }
+      },
+      {
+        "type": "file",
+        "mime": "text/plain",
+        "filename": "notes.txt",
+        "source": {
+          "path": "/tmp/notes.txt"
+        }
+      },
+      {
+        "type": "patch",
+        "files": [
+          "README.md",
+          "docs/guide.md"
+        ]
+      },
+      {
+        "type": "snapshot",
+        "snapshot": "SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT SNAPSHOT"
+      },
+      {
+        "type": "retry",
+        "attempt": 2,
+        "error": {
+          "data": {
+            "message": "Tool timed out once"
+          }
+        }
+      },
+      {
+        "type": "step-finish",
+        "reason": "stop"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_compact_tools_trigger",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "compaction"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_compact_tools_summary",
+      "parentID": "msg_compact_tools_trigger",
+      "role": "assistant",
+      "summary": true,
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "## Goal\n\n- Mantener continuidad de una investigacion tecnica.\n\n## Discoveries\n\n- Hallazgo previo A: el backend usa modulos separados por dominio.\n- Hallazgo previo B: el frontend depende de un sistema de temas compartido.\n- Hallazgo previo C: existe una herramienta auxiliar para autenticacion.\n\n## Critical Context\n\n- Ya se inspeccionaron README, package.json y algunos archivos clave.\n- El siguiente paso probable es conectar hallazgos con arquitectura y flujos entre componentes.\n- Se debe preservar el idioma espanol y evitar perder decisiones previas.\n\n## Relevant Files\n\n- /workspace/repo/README.md\n- /workspace/repo/package.json\n- /workspace/repo/src/app.module.ts"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user_tools_2",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Ahora dime como se conectan frontend y backend."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_tools_2",
+      "parentID": "msg_user_tools_2",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Se conectan por HTTP usando endpoints del backend."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_user_tools_3",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Que archivos debo revisar primero?"
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_assistant_tools_3",
+      "parentID": "msg_user_tools_3",
+      "role": "assistant"
+    },
+    "parts": [
+      {
+        "type": "text",
+        "text": "Empieza por README, package.json y el modulo principal."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_pending_tools_compaction",
+      "role": "user"
+    },
+    "parts": [
+      {
+        "type": "compaction"
+      }
+    ]
+  }
+]

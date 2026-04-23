@@ -1,0 +1,15 @@
+{
+  "model": "gpt-5.4",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Inspecciona el repo y registra hallazgos técnicos."
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Inspeccioné el repositorio y ejecuté varias herramientas.\n\n[Tool] rg\n\n[Tool completed] rg README\n\nInput:\n{\n  \"pattern\": \"README|package.json\",\n  \"path\": \"/workspace/repo\"\n}\n\nOutput:\nHEADER HEADER HEADER HEADER HEADER\n[...snip...]\n TAIL TAIL TAIL TAIL TAIL TAIL TAIL\n\n[Tool] read-file\n\n[Tool error]\n\nInput:\n{\n  \"path\": \"/workspace/repo/secret.env\"\n}\n\nError:\nPermission denied\n\n[Attached text/plain: notes.txt]\nSource: /tmp/notes.txt\n\n[Patch] README.md, docs/guide.md\n\n[Retry 2] Tool timed out once\n\n[Step finished] stop"
+    }
+  ]
+}
