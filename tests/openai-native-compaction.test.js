@@ -182,6 +182,27 @@ test("selectHead ignores synthetic DCP summaries when preserving the last user t
   );
 });
 
+test("reduceCompactInputItems halves multi-message windows and truncates a single oversized item", () => {
+  const multi = [
+    { type: "message", role: "user", content: "uno" },
+    { type: "message", role: "assistant", content: "dos" },
+    { type: "message", role: "user", content: "tres" },
+    { type: "message", role: "assistant", content: "cuatro" },
+  ];
+
+  const halved = __test.reduceCompactInputItems(multi);
+  assert.deepEqual(
+    halved.map((item) => item.content),
+    ["tres", "cuatro"],
+  );
+
+  const single = [{ type: "message", role: "user", content: "x".repeat(12000) }];
+  const truncated = __test.reduceCompactInputItems(single);
+  assert.equal(truncated.length, 1);
+  assert.ok(truncated[0].content.length < single[0].content.length);
+  assert.match(truncated[0].content, /\[\.\.\.snip\.\.\.\]/);
+});
+
 test("computeNativeSummary replays compact -> responses using the sanitized fixtures", async () => {
   const messages = readFixture("session-with-compaction.json").slice(0, 8);
   const compactResponse = readFixture("compact-response.json");
@@ -480,6 +501,116 @@ test("computeNativeSummary reuses active DCP summaries from persisted plugin sta
   }
 });
 
+test("computeNativeSummary retries /responses/compact with a smaller input when the request is too large", async () => {
+  const messages = [
+    {
+      info: { id: "msg_user_1", sessionID: "ses_reduce", role: "user", time: { created: 1000 } },
+      parts: [{ type: "text", text: "Turno 1" }],
+    },
+    {
+      info: { id: "msg_assistant_1", sessionID: "ses_reduce", role: "assistant", time: { created: 2000 } },
+      parts: [{ type: "text", text: "Respuesta 1" }],
+    },
+    {
+      info: { id: "msg_user_2", sessionID: "ses_reduce", role: "user", time: { created: 3000 } },
+      parts: [{ type: "text", text: "Turno 2" }],
+    },
+    {
+      info: { id: "msg_assistant_2", sessionID: "ses_reduce", role: "assistant", time: { created: 4000 } },
+      parts: [{ type: "text", text: "Respuesta 2" }],
+    },
+    {
+      info: { id: "msg_user_3", sessionID: "ses_reduce", role: "user", time: { created: 5000 } },
+      parts: [{ type: "text", text: "Turno 3" }],
+    },
+    {
+      info: { id: "msg_assistant_3", sessionID: "ses_reduce", role: "assistant", time: { created: 6000 } },
+      parts: [{ type: "text", text: "Respuesta 3" }],
+    },
+  ];
+
+  const compactResponse = readFixture("compact-response.json");
+  const summaryResponse = readFixture("summary-response.json");
+  const compactAttempts = [];
+
+  const previousFetch = globalThis.fetch;
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+  const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+
+  process.env.OPENAI_API_KEY = "sk-test";
+  process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "1";
+
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(String(options.body));
+
+    if (url.endsWith("/responses/compact")) {
+      compactAttempts.push(body.input.length);
+
+      if (body.input.length > 2) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: () => null },
+          async text() {
+            return JSON.stringify({
+              error: {
+                message:
+                  "Request too large for gpt-5.4 (for limit gpt-5.4-long-context) on tokens per min (TPM): Limit 400000, Requested 794930.",
+              },
+            });
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify(compactResponse);
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify(summaryResponse);
+      },
+    };
+  };
+
+  try {
+    const summary = await __test.computeNativeSummary({
+      client: {
+        app: {
+          log: async () => ({ data: {} }),
+        },
+        session: {
+          messages: async () => ({ data: messages }),
+        },
+      },
+      sessionID: "ses_reduce",
+      dumpRun: undefined,
+    });
+
+    assert.equal(summary, "## Goal\n\n- Explicar el repo.");
+    assert.deepEqual(compactAttempts, [4, 2]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousApiKey;
+    if (previousModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MODEL = previousModel;
+    if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+    if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
+    else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
+  }
+});
+
 test("computeNativeSummary can include reasoning and snapshots when explicitly enabled", async () => {
   const messages = readFixture("session-with-tools-and-summary.json");
   const compactResponse = readFixture("compact-response.json");
@@ -727,6 +858,61 @@ test("openaiRequest retries once on 429 and then succeeds", async () => {
     else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
     if (previousRetryBase === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS;
     else process.env.OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS = previousRetryBase;
+  }
+});
+
+test("openaiRequest does not retry oversized 429 requests and classifies them as request_too_large", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousRetries = process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+  let attempts = 0;
+
+  process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = "1";
+
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return {
+      ok: false,
+      status: 429,
+      headers: { get: () => null },
+      async text() {
+        return JSON.stringify({
+          error: {
+            message:
+              "Request too large for gpt-5.4 (for limit gpt-5.4-long-context) on tokens per min (TPM): Limit 400000, Requested 794930.",
+          },
+        });
+      },
+    };
+  };
+
+  try {
+    await assert.rejects(
+      async () => {
+        try {
+          await __test.openaiRequest({
+            apiKey: "sk-test",
+            baseUrl: "https://api.openai.com/v1",
+            path: "/responses/compact",
+            body: { model: "gpt-5.4" },
+            timeoutMs: 1000,
+          });
+        } catch (error) {
+          assert.equal(error instanceof __test.OpenAIRequestError, true);
+          assert.equal(error.retryable, false);
+          assert.equal(error.status, 429);
+          assert.equal(error.code, "request_too_large");
+          assert.equal(__test.isCompactOversizeError(error), true);
+          throw error;
+        }
+      },
+      /Request too large for gpt-5\.4/,
+    );
+
+    assert.equal(attempts, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousRetries === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES;
+    else process.env.OPENCODE_NATIVE_COMPACTION_MAX_RETRIES = previousRetries;
   }
 });
 

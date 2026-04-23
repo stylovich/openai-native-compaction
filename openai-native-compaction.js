@@ -7,6 +7,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RETRIES = 1;
 const DEFAULT_RETRY_BASE_MS = 750;
 const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 6_000;
+const DEFAULT_MIN_COMPACT_ITEM_CHARS = 2_048;
 const DEFAULT_API_KEY_FILE = `${process.env.HOME || ""}/.config/opencode/openai-native-compaction.key`;
 const DEFAULT_OPENCODE_AUTH_PATH = `${process.env.HOME || ""}/.local/share/opencode/auth.json`;
 const DEFAULT_DCP_STORAGE_DIR = `${process.env.XDG_DATA_HOME || `${process.env.HOME || ""}/.local/share`}/opencode/storage/plugin/dcp`;
@@ -154,6 +155,28 @@ function isRetryableStatus(status) {
   return [408, 409, 425, 429, 500, 502, 503, 504].includes(status);
 }
 
+function isRequestTooLargeMessage(message) {
+  const value = String(message || "").trim();
+  if (!value) return false;
+
+  return (
+    /request too large/i.test(value) ||
+    /conversation history too large to compact/i.test(value) ||
+    /exceeds model context limit/i.test(value) ||
+    /maximum context length/i.test(value) ||
+    /context[_ -]?length[_ -]?exceeded/i.test(value) ||
+    (/tokens per min/i.test(value) && /requested/i.test(value) && /limit/i.test(value))
+  );
+}
+
+function isCompactOversizeError(error) {
+  return (
+    error instanceof OpenAIRequestError &&
+    error.path === "/responses/compact" &&
+    (error.code === "request_too_large" || isRequestTooLargeMessage(error.message))
+  );
+}
+
 function httpStatusLabel(status) {
   const labels = {
     400: "Bad Request",
@@ -217,7 +240,9 @@ function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, 
         : `${path} failed with HTTP ${status}`;
 
   let message = apiMessage;
-  const retryable = isRetryableStatus(status);
+  let retryable = isRetryableStatus(status);
+  let code = `http_${status}`;
+  const requestTooLarge = isRequestTooLargeMessage(apiMessage);
 
   if (status === 401) {
     message = `${path} failed with HTTP 401 Unauthorized. Verify the configured OpenAI API key or auth token.`;
@@ -228,17 +253,26 @@ function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, 
   } else if (status === 429) {
     const retryHint = retryAfterMs ? ` Retry-After=${retryAfterMs}ms.` : "";
     message = `${path} failed with HTTP 429 Too Many Requests.${retryHint} ${apiMessage}`.trim();
+    if (requestTooLarge) {
+      retryable = false;
+      code = "request_too_large";
+    }
   } else if (status >= 500) {
     message = `${path} failed with HTTP ${status} ${httpStatusLabel(status)}. ${apiMessage}`.trim();
   } else if (!apiMessage.startsWith(path)) {
     message = `${path} failed with HTTP ${status} ${httpStatusLabel(status)}. ${apiMessage}`.trim();
   }
 
+  if (requestTooLarge) {
+    retryable = false;
+    code = "request_too_large";
+  }
+
   return new OpenAIRequestError({
     message,
     path,
     status,
-    code: `http_${status}`,
+    code,
     retryable,
     attempt,
     maxAttempts,
@@ -822,6 +856,119 @@ function normalizeCompactedWindow(items) {
   });
 }
 
+function compactInputStats(items) {
+  const messages = Array.isArray(items) ? items.length : 0;
+  const totalChars = (items ?? []).reduce((total, item) => total + String(item?.content || "").length, 0);
+  const maxChars = (items ?? []).reduce((max, item) => Math.max(max, String(item?.content || "").length), 0);
+
+  return {
+    messages,
+    totalChars,
+    maxChars,
+  };
+}
+
+function reduceCompactInputItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  if (items.length > 1) {
+    return items.slice(-Math.ceil(items.length / 2));
+  }
+
+  const [item] = items;
+  const content = typeof item?.content === "string" ? item.content : "";
+  if (!content) return items;
+
+  const minChars = Math.max(256, envInt("OPENCODE_NATIVE_COMPACTION_MIN_COMPACT_ITEM_CHARS", DEFAULT_MIN_COMPACT_ITEM_CHARS));
+  if (content.length <= minChars) {
+    return items;
+  }
+
+  const nextChars = Math.max(minChars, Math.floor(content.length / 2));
+  if (nextChars >= content.length) {
+    return items;
+  }
+
+  return [
+    {
+      ...item,
+      content: truncateMiddle(content, nextChars),
+    },
+  ];
+}
+
+async function compactWithAdaptiveReduction({
+  apiKey,
+  baseUrl,
+  timeoutMs,
+  model,
+  inputItems,
+  client,
+  sessionID,
+}) {
+  let candidateItems = inputItems;
+  let reductions = 0;
+
+  while (candidateItems.length > 0) {
+    try {
+      const compacted = await openaiRequest({
+        apiKey,
+        baseUrl,
+        path: "/responses/compact",
+        timeoutMs,
+        body: {
+          model,
+          input: candidateItems,
+        },
+      });
+
+      return {
+        compacted,
+        compactInput: candidateItems,
+        reductions,
+      };
+    } catch (error) {
+      if (!isCompactOversizeError(error)) {
+        throw error;
+      }
+
+      const nextItems = reduceCompactInputItems(candidateItems);
+      const unchanged =
+        nextItems.length === candidateItems.length &&
+        nextItems.every((item, index) => item?.content === candidateItems[index]?.content);
+
+      if (unchanged) {
+        throw error;
+      }
+
+      reductions += 1;
+
+      if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
+        await safeLog(
+          client,
+          "warn",
+          "PLUGIN_REDUCED_COMPACT_INPUT_OPENAI_NATIVE_COMPACTION Reducing compact input after oversized request.",
+          {
+            sessionID,
+            reduction: reductions,
+            previous: compactInputStats(candidateItems),
+            next: compactInputStats(nextItems),
+            code: error.code,
+          },
+        );
+      }
+
+      candidateItems = nextItems;
+    }
+  }
+
+  throw createRuntimeError({
+    message: "Unable to reduce compact input to a valid size",
+    path: "/responses/compact",
+    code: "compact_input_exhausted",
+  });
+}
+
 function getApiKey() {
   return env("OPENCODE_NATIVE_COMPACTION_API_KEY", env("OPENAI_API_KEY", getLocalApiKeyFileToken() || getOpenCodeOpenAIAuthToken()));
 }
@@ -919,15 +1066,14 @@ async function computeNativeSummary({ client, sessionID }) {
   const model = env("OPENCODE_NATIVE_COMPACTION_MODEL", DEFAULT_MODEL);
   const summaryModel = env("OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL", model);
 
-  const compacted = await openaiRequest({
+  const { compacted } = await compactWithAdaptiveReduction({
     apiKey,
     baseUrl,
-    path: "/responses/compact",
     timeoutMs,
-    body: {
-      model,
-      input: inputItems,
-    },
+    model,
+    inputItems,
+    client,
+    sessionID,
   });
 
   const compactedWindow = normalizeCompactedWindow(Array.isArray(compacted?.output) ? compacted.output : []);
@@ -1026,10 +1172,13 @@ export const OpenAINativeCompactionPlugin = async ({ client }) => {
 export const __test = {
   SUMMARY_TEMPLATE,
   buildSummaryPrompt,
+  compactInputStats,
   completedCompactions,
   computeNativeSummary,
   dropPendingCompactionTail,
   extractResponseText,
+  isCompactOversizeError,
+  isRequestTooLargeMessage,
   latestCompletedCompaction,
   normalizeBaseUrl,
   normalizeCompactedWindow,
@@ -1043,5 +1192,6 @@ export const __test = {
   openaiRequest,
   parseApiKey,
   parseRetryAfterMs,
+  reduceCompactInputItems,
   selectHead,
 };
