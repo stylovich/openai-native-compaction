@@ -8,17 +8,17 @@ const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 6_000;
 const DEFAULT_API_KEY_FILE = `${process.env.HOME || ""}/.config/opencode/openai-native-compaction.key`;
 const DEFAULT_OPENCODE_AUTH_PATH = `${process.env.HOME || ""}/.local/share/opencode/auth.json`;
 
-// Mirrors OpenCode's current anchored summary template as closely as possible.
+// Preserve operational continuity while retaining important factual discoveries.
 const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
 
 ---
 ## Goal
 
-- [single-sentence task summary]
+- [single-sentence current objective]
 
-## Constraints & Preferences
+## Active User Preferences & Constraints
 
-- [user constraints, preferences, specs, or "(none)"]
+- [durable user preferences, constraints, specs, language/style requirements, or "(none)"]
 
 ## Progress
 
@@ -33,6 +33,10 @@ const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the se
 ### Blocked
 
 - [blockers or "(none)"]
+
+## Discoveries
+
+- [important factual findings from the repo, API, tools, errors, data, or "(none)"]
 
 ## Key Decisions
 
@@ -57,6 +61,8 @@ Rules:
 - Keep every section, even when empty.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, commands, error strings, and identifiers when known.
+- Treat Active User Preferences & Constraints as durable guidance only; do not copy temporary summary or compaction instructions as active preferences.
+- Put factual findings in Discoveries; put continuation-critical state in Critical Context; avoid duplicating long lists across both.
 - Do not mention the summary process or that context was compacted.`;
 
 function env(name, fallback = "") {
