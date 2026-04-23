@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { __test } from "../openai-native-compaction.js";
+import OpenAINativeCompactionPlugin, { __test } from "../openai-native-compaction.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +15,10 @@ function readFixture(name) {
 test("normalizeBaseUrl appends v1 and trims trailing slashes", () => {
   assert.equal(__test.normalizeBaseUrl("https://api.openai.com"), "https://api.openai.com/v1");
   assert.equal(__test.normalizeBaseUrl("https://api.openai.com/v1/"), "https://api.openai.com/v1");
+});
+
+test("plugin module exposes a default plugin factory export", () => {
+  assert.equal(typeof OpenAINativeCompactionPlugin, "function");
 });
 
 test("parseApiKey supports raw and assignment formats", () => {

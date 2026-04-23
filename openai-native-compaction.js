@@ -1169,6 +1169,8 @@ export const OpenAINativeCompactionPlugin = async ({ client }) => {
   };
 };
 
+export default OpenAINativeCompactionPlugin;
+
 export const __test = {
   SUMMARY_TEMPLATE,
   buildSummaryPrompt,
