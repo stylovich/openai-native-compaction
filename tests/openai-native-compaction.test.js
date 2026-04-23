@@ -23,6 +23,65 @@ test("plugin module exposes a default plugin factory export", () => {
   assert.equal(typeof OpenAINativeCompactionPlugin.server, "function");
 });
 
+test("isInternalCompactionSystemPrompt detects OpenCode's internal compaction agent prompt", () => {
+  assert.equal(
+    __test.isInternalCompactionSystemPrompt("You are a helpful AI assistant tasked with summarizing conversations."),
+    true,
+  );
+  assert.equal(__test.isInternalCompactionSystemPrompt("You are a normal coding assistant."), false);
+});
+
+test("buildMinimalCompactionMessages keeps a tiny user compaction batch", () => {
+  const messages = [
+    {
+      info: {
+        id: "msg_prev",
+        sessionID: "ses_test",
+        role: "assistant",
+        agent: "build",
+        time: { created: 1 },
+      },
+      parts: [],
+    },
+    {
+      info: {
+        id: "msg_compact",
+        sessionID: "ses_test",
+        role: "user",
+        agent: "compaction",
+        time: { created: 2 },
+      },
+      parts: [
+        {
+          id: "part_compaction",
+          sessionID: "ses_test",
+          messageID: "msg_compact",
+          type: "compaction",
+          auto: true,
+        },
+        {
+          id: "part_text",
+          sessionID: "ses_test",
+          messageID: "msg_compact",
+          type: "text",
+          text: "x".repeat(20_000),
+        },
+      ],
+    },
+  ];
+
+  const minimal = __test.buildMinimalCompactionMessages(messages);
+
+  assert.equal(minimal.length, 1);
+  assert.equal(minimal[0].info.id, "msg_compact");
+  assert.equal(minimal[0].parts.length, 2);
+  assert.equal(minimal[0].parts[0].type, "compaction");
+  assert.equal(minimal[0].parts[1].type, "text");
+  assert.match(minimal[0].parts[1].text, /final compacted summary only/i);
+  assert.equal(__test.getSessionIDFromMessages(minimal), "ses_test");
+  assert.equal(__test.hasRecentCompactionMarker(messages), true);
+});
+
 test("parseApiKey supports raw and assignment formats", () => {
   assert.equal(__test.parseApiKey("sk-test"), "sk-test");
   assert.equal(__test.parseApiKey("OPENAI_API_KEY=sk-test"), "sk-test");

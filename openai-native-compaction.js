@@ -15,6 +15,12 @@ const DCP_COMPRESSED_BLOCK_HEADER = "[Compressed conversation section]";
 const DCP_HEADER_REGEX = /^\s*\[Compressed conversation(?: section)?(?: b\d+)?\]/i;
 const DCP_TRAILING_BLOCK_TAG_REGEX = /(?:\r?\n)*<dcp-message-id(?=[\s>])[^>]*>b\d+<\/dcp-message-id>\s*$/i;
 const DCP_PAIRED_TAG_REGEX = /<dcp[^>]*>[\s\S]*?<\/dcp[^>]*>/gi;
+const INTERNAL_COMPACTION_SIGNATURES = [
+  "You are a helpful AI assistant tasked with summarizing conversations",
+  "Summarize what was done in this conversation",
+  "Return a concise markdown summary",
+];
+const DEFAULT_COMPACTION_STATE_MAX_AGE_MS = 5 * 60_000;
 
 // Preserve operational continuity while retaining important factual discoveries.
 const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
@@ -742,6 +748,68 @@ function buildEchoPrompt(summary) {
   ].join("\n\n");
 }
 
+function isInternalCompactionSystemPrompt(systemText) {
+  return INTERNAL_COMPACTION_SIGNATURES.some((signature) => systemText.includes(signature));
+}
+
+function isMessageBatchEntry(entry) {
+  return (
+    entry &&
+    typeof entry === "object" &&
+    entry.info &&
+    typeof entry.info === "object" &&
+    typeof entry.info.id === "string" &&
+    typeof entry.info.sessionID === "string" &&
+    Array.isArray(entry.parts)
+  );
+}
+
+function getSessionIDFromMessages(messages) {
+  const first = Array.isArray(messages) ? messages.find(isMessageBatchEntry) : undefined;
+  return first?.info?.sessionID;
+}
+
+function hasRecentCompactionMarker(messages, windowSize = 3) {
+  if (!Array.isArray(messages) || messages.length === 0) return false;
+  return messages.slice(-windowSize).some((entry) => {
+    if (!isMessageBatchEntry(entry)) return false;
+    if (entry.info.agent === "compaction") return true;
+    return entry.parts.some((part) => part && typeof part === "object" && part.type === "compaction");
+  });
+}
+
+function buildMinimalCompactionMessages(messages) {
+  const usable = Array.isArray(messages) ? messages.filter(isMessageBatchEntry) : [];
+  const candidate =
+    [...usable].reverse().find((entry) => entry.info.role === "user" && entry.info.agent === "compaction") ||
+    [...usable].reverse().find((entry) => entry.info.role === "user");
+
+  if (!candidate) return [];
+
+  const compactionPart = candidate.parts.find((part) => part && typeof part === "object" && part.type === "compaction");
+  const parts = [];
+
+  if (compactionPart) {
+    parts.push(compactionPart);
+  }
+
+  parts.push({
+    id: `${candidate.info.id}-native-compaction-text`,
+    sessionID: candidate.info.sessionID,
+    messageID: candidate.info.id,
+    type: "text",
+    synthetic: true,
+    text: "Use the compaction prompt to output the final compacted summary only.",
+  });
+
+  return [
+    {
+      info: candidate.info,
+      parts,
+    },
+  ];
+}
+
 async function openaiRequest({ apiKey, baseUrl, path, body, timeoutMs }) {
   const maxRetries = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_MAX_RETRIES", DEFAULT_MAX_RETRIES));
   const maxAttempts = maxRetries + 1;
@@ -1122,11 +1190,89 @@ export const PLUGIN_ID = "openai-native-compaction";
 
 export const server = async ({ client }) => {
   let warnedMissingKey = false;
+  const pendingCompactions = new Map();
+  const activeCompactionTransforms = new Set();
+  const compactionStateMaxAgeMs = envInt("OPENCODE_NATIVE_COMPACTION_STATE_MAX_AGE_MS", DEFAULT_COMPACTION_STATE_MAX_AGE_MS);
+
+  function clearCompactionState(sessionID) {
+    if (!sessionID) return;
+    pendingCompactions.delete(sessionID);
+    activeCompactionTransforms.delete(sessionID);
+  }
+
+  function pruneStaleCompactionState(now = Date.now()) {
+    for (const [sessionID, state] of pendingCompactions.entries()) {
+      if (!state || typeof state.createdAt !== "number") {
+        clearCompactionState(sessionID);
+        continue;
+      }
+
+      if (now - state.createdAt > compactionStateMaxAgeMs) {
+        clearCompactionState(sessionID);
+      }
+    }
+  }
 
   await safeLog(client, "info", "PLUGIN_INITIALIZED_OPENAI_NATIVE_COMPACTION OpenAI-native compaction plugin initialized.");
 
   return {
+    event: async (input) => {
+      const sessionID = input?.event?.properties?.sessionID;
+
+      switch (input?.event?.type) {
+        case "session.compacted":
+        case "session.error":
+        case "session.idle":
+          clearCompactionState(sessionID);
+          break;
+        default:
+          break;
+      }
+    },
+    "experimental.chat.system.transform": async (input, output) => {
+      pruneStaleCompactionState();
+
+      if (!input?.sessionID) return;
+      if (!pendingCompactions.has(input.sessionID)) return;
+
+      const systemText = Array.isArray(output.system) ? output.system.join("\n") : "";
+      if (!isInternalCompactionSystemPrompt(systemText)) return;
+
+      activeCompactionTransforms.add(input.sessionID);
+
+      if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
+        await safeLog(client, "info", "PLUGIN_DETECTED_INTERNAL_COMPACTION_OPENAI_NATIVE_COMPACTION Detected OpenCode internal compaction agent.", {
+          sessionID: input.sessionID,
+        });
+      }
+    },
+    "experimental.chat.messages.transform": async (_input, output) => {
+      pruneStaleCompactionState();
+
+      const sessionID = getSessionIDFromMessages(output.messages);
+      if (!sessionID) return;
+      if (!pendingCompactions.has(sessionID)) return;
+
+      const shouldTrim = activeCompactionTransforms.has(sessionID) || hasRecentCompactionMarker(output.messages);
+      if (!shouldTrim) return;
+
+      const replacement = buildMinimalCompactionMessages(output.messages);
+      if (replacement.length === 0) return;
+
+      const previousCount = Array.isArray(output.messages) ? output.messages.length : 0;
+      output.messages.splice(0, output.messages.length, ...replacement);
+
+      if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
+        await safeLog(client, "info", "PLUGIN_TRIMMED_COMPACTION_MESSAGES_OPENAI_NATIVE_COMPACTION Replaced compaction message batch with a minimal echo batch.", {
+          sessionID,
+          previousCount,
+          nextCount: output.messages.length,
+        });
+      }
+    },
     "experimental.session.compacting": async (input, output) => {
+      pruneStaleCompactionState();
+
       if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
         await safeLog(client, "info", "PLUGIN_HOOK_ENTERED_OPENAI_NATIVE_COMPACTION experimental.session.compacting hook entered.", {
           sessionID: input.sessionID,
@@ -1154,6 +1300,11 @@ export const server = async ({ client }) => {
         }
 
         output.prompt = buildEchoPrompt(summary);
+        pendingCompactions.set(input.sessionID, {
+          createdAt: Date.now(),
+          summary,
+        });
+        activeCompactionTransforms.delete(input.sessionID);
 
         if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
           await safeLog(client, "info", "PLUGIN_USED_OPENAI_NATIVE_COMPACTION Installed OpenAI-native compaction summary into OpenCode prompt.", {
@@ -1162,6 +1313,7 @@ export const server = async ({ client }) => {
           });
         }
       } catch (error) {
+        clearCompactionState(input.sessionID);
         await safeLog(client, "warning", "PLUGIN_FALLBACK_OPENAI_NATIVE_COMPACTION OpenAI-native compaction failed; falling back to OpenCode's default compaction.", {
           sessionID: input.sessionID,
           ...errorMetadata(error),
@@ -1180,12 +1332,16 @@ export default OpenAINativeCompactionPlugin;
 
 export const __test = {
   SUMMARY_TEMPLATE,
+  buildMinimalCompactionMessages,
   buildSummaryPrompt,
   compactInputStats,
   completedCompactions,
   computeNativeSummary,
   dropPendingCompactionTail,
   extractResponseText,
+  getSessionIDFromMessages,
+  hasRecentCompactionMarker,
+  isInternalCompactionSystemPrompt,
   isCompactOversizeError,
   isRequestTooLargeMessage,
   latestCompletedCompaction,
