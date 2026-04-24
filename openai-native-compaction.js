@@ -77,6 +77,7 @@ const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the se
 Rules:
 
 - Keep every section, even when empty.
+- Write the summary in Spanish unless the active user preference explicitly changed to another language.
 - Use terse bullets, not prose paragraphs.
 - Preserve exact file paths, commands, error strings, and identifiers when known.
 - Treat Active User Preferences & Constraints as durable guidance only; do not copy temporary summary or compaction instructions as active preferences.

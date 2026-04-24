@@ -200,6 +200,7 @@ test("buildSummaryPrompt includes the new durable-preferences and discoveries se
   assert.match(prompt, /## Discoveries/);
   assert.match(prompt, /<previous-summary>/);
   assert.match(prompt, /current-state relevant completed work only/);
+  assert.match(prompt, /Write the summary in Spanish/);
   assert.match(prompt, /Preserve pending user-requested activities/);
 });
 
