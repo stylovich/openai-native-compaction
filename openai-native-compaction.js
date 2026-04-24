@@ -176,6 +176,16 @@ function isRetryableStatus(status) {
   return [408, 409, 425, 429, 500, 502, 503, 504].includes(status);
 }
 
+function tokenRequestExceedsLimit(message) {
+  const match = String(message || "").match(/Limit\s+([\d,]+)[^.\n]*Requested\s+([\d,]+)/i);
+  if (!match) return false;
+
+  const limit = Number.parseInt(match[1].replace(/,/g, ""), 10);
+  const requested = Number.parseInt(match[2].replace(/,/g, ""), 10);
+
+  return Number.isFinite(limit) && Number.isFinite(requested) && requested > limit;
+}
+
 function isRequestTooLargeMessage(message) {
   const value = String(message || "").trim();
   if (!value) return false;
@@ -187,7 +197,7 @@ function isRequestTooLargeMessage(message) {
     /exceeds model context limit/i.test(value) ||
     /maximum context length/i.test(value) ||
     /context[_ -]?length[_ -]?exceeded/i.test(value) ||
-    (/tokens per min/i.test(value) && /requested/i.test(value) && /limit/i.test(value))
+    (/tokens per min/i.test(value) && tokenRequestExceedsLimit(value))
   );
 }
 

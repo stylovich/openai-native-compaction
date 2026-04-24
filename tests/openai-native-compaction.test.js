@@ -170,6 +170,18 @@ test("isRetryableStatus marks only transient HTTP classes as retryable", () => {
 
 test("isRequestTooLargeMessage detects context window errors", () => {
   assert.equal(__test.isRequestTooLargeMessage("Your input exceeds the context window of this model."), true);
+  assert.equal(
+    __test.isRequestTooLargeMessage(
+      "Rate limit reached for gpt-5.4-mini on tokens per min (TPM): Limit 200000, Used 114422, Requested 139953.",
+    ),
+    false,
+  );
+  assert.equal(
+    __test.isRequestTooLargeMessage(
+      "Request too large for gpt-5.4 on tokens per min (TPM): Limit 400000, Requested 794930.",
+    ),
+    true,
+  );
 });
 
 test("buildSummaryPrompt includes the new durable-preferences and discoveries sections", () => {
