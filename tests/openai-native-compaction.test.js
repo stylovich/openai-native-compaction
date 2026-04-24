@@ -168,6 +168,10 @@ test("isRetryableStatus marks only transient HTTP classes as retryable", () => {
   assert.equal(__test.isRetryableStatus(503), true);
 });
 
+test("isRequestTooLargeMessage detects context window errors", () => {
+  assert.equal(__test.isRequestTooLargeMessage("Your input exceeds the context window of this model."), true);
+});
+
 test("buildSummaryPrompt includes the new durable-preferences and discoveries sections", () => {
   const prompt = __test.buildSummaryPrompt("## Goal\n\n- Previous summary.");
 

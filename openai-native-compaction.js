@@ -183,6 +183,7 @@ function isRequestTooLargeMessage(message) {
   return (
     /request too large/i.test(value) ||
     /conversation history too large to compact/i.test(value) ||
+    /exceeds (?:the )?context window/i.test(value) ||
     /exceeds model context limit/i.test(value) ||
     /maximum context length/i.test(value) ||
     /context[_ -]?length[_ -]?exceeded/i.test(value) ||
