@@ -120,6 +120,21 @@ normal OpenAI API key.
 
 ## Environment Variables
 
+Recommended stable setup:
+
+```bash
+export OPENCODE_NATIVE_COMPACTION_MODEL="gpt-5.4-mini"
+export OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL="gpt-5.2"
+export OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT="medium"
+export OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT="medium"
+export OPENCODE_NATIVE_COMPACTION_MAX_RETRIES="3"
+export OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES="0"
+```
+
+This keeps native compaction on the cheaper/fast model, uses `gpt-5.2` for the
+large Markdown summary request, and leaves message dumps disabled for normal
+daily use.
+
 Main settings:
 
 ```bash
@@ -137,6 +152,7 @@ export OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING="${OPENCODE_NATIVE_COMPACTIO
 export OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS="${OPENCODE_NATIVE_COMPACTION_INCLUDE_SNAPSHOTS:-0}"
 export OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP="${OPENCODE_NATIVE_COMPACTION_ENABLE_DCP_INTEROP:-1}"
 export OPENCODE_NATIVE_COMPACTION_DEBUG="${OPENCODE_NATIVE_COMPACTION_DEBUG:-1}"
+export OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES="${OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES:-0}"
 ```
 
 Optional extras:
@@ -153,11 +169,12 @@ field from that OpenAI request.
 
 ## Runtime Behavior
 
-- The plugin retries transient OpenAI failures once by default.
+- The plugin retries transient OpenAI failures up to `3` times by default.
 - Retryable statuses are `408`, `409`, `425`, `429`, `500`, `502`, `503`,
   and `504`.
 - `401`, `403`, and other non-transient `4xx` responses are not retried.
-- `Retry-After` is respected when OpenAI returns it.
+- `Retry-After` is respected when OpenAI returns it. If OpenAI only includes a
+  text hint such as `Please try again in 15.321s`, that hint is also parsed.
 - Timeout/network/API failures fall back to OpenCode's default compaction path
   instead of breaking the session.
 - Fallback logs include structured metadata such as `code`, `status`,
@@ -233,6 +250,8 @@ export OPENCODE_NATIVE_COMPACTION_MODEL="gpt-5.4-mini"
 export OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL="gpt-5.2"
 export OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT="medium"
 export OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT="medium"
+export OPENCODE_NATIVE_COMPACTION_MAX_RETRIES="3"
+export OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES="0"
 export OPENCODE_NATIVE_COMPACTION_DEBUG="1"
 opencode
 ```
@@ -277,6 +296,19 @@ Or manually:
 
 ```bash
 rg "PLUGIN_HOOK_ENTERED|PLUGIN_USED|PLUGIN_FALLBACK|PLUGIN_NO_AUTH|PLUGIN_NO_SUMMARY" ~/.local/share/opencode/log
+```
+
+For temporary deep debugging, enable message dumps before starting OpenCode:
+
+```bash
+export OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES="1"
+export OPENCODE_NATIVE_COMPACTION_MESSAGE_DUMP_LIMIT="200"
+```
+
+Dump files are written to:
+
+```text
+~/.local/share/opencode/openai-native-compaction-message-dumps/
 ```
 
 Success marker:
