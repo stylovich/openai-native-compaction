@@ -58,6 +58,7 @@ that OpenCode stores.
   OpenCode with the plugin environment.
 - `scripts/check-compaction-log.sh`: shows the latest OpenCode compaction/plugin
   log markers.
+- `codemem/`: optional persistent-memory setup for OpenCode.
 
 ## Quick Install
 
@@ -216,6 +217,18 @@ cp dcp-prompts/overrides/*.md ~/.config/opencode/dcp-prompts/overrides/
 ```
 
 Restart OpenCode/OpenChamber after changing DCP config or prompt files.
+
+## Optional codemem Memory
+
+This repo also includes an optional codemem installer:
+
+```bash
+./codemem/install-codemem.sh
+```
+
+It installs codemem's OpenCode plugin + MCP entry, writes
+`~/.config/codemem/config.jsonc`, and aligns codemem's observer with
+`gpt-5.4-mini`. See `codemem/README.md` for details.
 
 ## OpenChamber / VS Code
 
