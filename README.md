@@ -74,10 +74,28 @@ This installs:
 ~/.config/opencode/plugins/openai-native-compaction.js
 ~/.local/bin/opencode-openchamber
 ~/.config/opencode/dcp-prompts/overrides/*.md
+~/.config/opencode/dcp.jsonc
 ~/.config/opencode/openai-native-compaction.key
 ```
 
 The key file is created with mode `600` if it does not exist.
+
+Recommended full setup on a new machine:
+
+```bash
+./scripts/install-global.sh
+./codemem/install-codemem.sh
+```
+
+Then configure VS Code/OpenChamber to use:
+
+```json
+{
+  "openchamber.opencodeBinary": "/home/YOUR_USER/.local/bin/opencode-openchamber"
+}
+```
+
+Finally reload VS Code and restart the OpenChamber API connection.
 
 ## API Key
 
@@ -203,10 +221,10 @@ $EDITOR ~/.config/opencode/dcp.jsonc
 }
 ```
 
-This config is local to each machine. The install script copies the prompt
-override files, but it does not edit `~/.config/opencode/dcp.jsonc`; set
-`experimental.customPrompts` on every machine where DCP should use the
-overrides.
+This config is local to each machine. `./scripts/install-global.sh` writes or
+updates `~/.config/opencode/dcp.jsonc` with `experimental.customPrompts=true` so
+DCP uses the prompt overrides. If you manage DCP manually, set the same flag on
+every machine where DCP should use the overrides.
 
 `./scripts/install-global.sh` copies the repo overrides into OpenCode's DCP
 prompt directory. To copy them manually:
