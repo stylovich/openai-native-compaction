@@ -188,6 +188,11 @@ field from that OpenAI request.
 If you use `@tarquinen/opencode-dcp` with this plugin, enable DCP custom prompts
 so DCP summaries stay in Spanish and preserve pending handoff tasks:
 
+```bash
+mkdir -p ~/.config/opencode
+$EDITOR ~/.config/opencode/dcp.jsonc
+```
+
 ```jsonc
 {
   "$schema": "https://raw.githubusercontent.com/Opencode-DCP/opencode-dynamic-context-pruning/master/dcp.schema.json",
@@ -196,6 +201,11 @@ so DCP summaries stay in Spanish and preserve pending handoff tasks:
   }
 }
 ```
+
+This config is local to each machine. The install script copies the prompt
+override files, but it does not edit `~/.config/opencode/dcp.jsonc`; set
+`experimental.customPrompts` on every machine where DCP should use the
+overrides.
 
 `./scripts/install-global.sh` copies the repo overrides into OpenCode's DCP
 prompt directory. To copy them manually:
