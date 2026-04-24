@@ -161,6 +161,15 @@ test("parseRetryAfterMs supports seconds and HTTP dates", () => {
   assert.ok(parsed <= 30_000);
 });
 
+test("parseRetryAfterMsFromMessage supports OpenAI rate limit hints", () => {
+  assert.equal(
+    __test.parseRetryAfterMsFromMessage(
+      "Rate limit reached. Please try again in 15.329s. Visit https://platform.openai.com/account/rate-limits",
+    ),
+    16329,
+  );
+});
+
 test("isRetryableStatus marks only transient HTTP classes as retryable", () => {
   assert.equal(__test.isRetryableStatus(401), false);
   assert.equal(__test.isRetryableStatus(403), false);

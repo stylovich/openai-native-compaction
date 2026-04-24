@@ -167,6 +167,17 @@ function parseRetryAfterMs(value) {
   return undefined;
 }
 
+function parseRetryAfterMsFromMessage(message) {
+  const match = String(message || "").match(/try again in\s+([\d.]+)\s*s(?:econds?)?/i);
+  if (!match) return undefined;
+
+  const seconds = Number.parseFloat(match[1]);
+  if (!Number.isFinite(seconds) || seconds < 0) return undefined;
+
+  // Add a small buffer because the API-provided seconds are often exact.
+  return Math.min(Math.round(seconds * 1000) + 1000, 30_000);
+}
+
 function defaultRetryDelayMs(attempt) {
   const baseMs = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_RETRY_BASE_MS", DEFAULT_RETRY_BASE_MS));
   return Math.min(baseMs * 2 ** Math.max(0, attempt - 1), 10_000);
@@ -270,6 +281,7 @@ function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, 
       : typeof raw === "string" && raw.trim()
         ? raw.trim()
         : `${path} failed with HTTP ${status}`;
+  const effectiveRetryAfterMs = retryAfterMs ?? parseRetryAfterMsFromMessage(apiMessage);
 
   let message = apiMessage;
   let retryable = isRetryableStatus(status);
@@ -283,7 +295,7 @@ function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, 
   } else if (status === 403) {
     message = `${path} failed with HTTP 403 Forbidden. Check model access, org/project permissions, or API key scopes.`;
   } else if (status === 429) {
-    const retryHint = retryAfterMs ? ` Retry-After=${retryAfterMs}ms.` : "";
+    const retryHint = effectiveRetryAfterMs ? ` Retry-After=${effectiveRetryAfterMs}ms.` : "";
     message = `${path} failed with HTTP 429 Too Many Requests.${retryHint} ${apiMessage}`.trim();
     if (requestTooLarge) {
       retryable = false;
@@ -308,7 +320,7 @@ function createOpenAIHttpError({ path, status, raw, json, attempt, maxAttempts, 
     retryable,
     attempt,
     maxAttempts,
-    retryAfterMs,
+    retryAfterMs: effectiveRetryAfterMs,
   });
 }
 
@@ -1500,6 +1512,7 @@ export const __test = {
   openaiRequest,
   parseApiKey,
   parseRetryAfterMs,
+  parseRetryAfterMsFromMessage,
   reduceCompactInputItems,
   selectHead,
 };
