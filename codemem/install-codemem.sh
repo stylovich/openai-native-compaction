@@ -12,6 +12,8 @@ opencode_config="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
 codemem_config_dir="${CODEMEM_CONFIG_DIR:-$HOME/.config/codemem}"
 codemem_config="$codemem_config_dir/config.jsonc"
 wrapper="${OPENCODE_OPENCHAMBER_WRAPPER:-$HOME/.local/bin/opencode-openchamber}"
+bin_dir="${CODEMEM_BIN_DIR:-$HOME/.local/bin}"
+codemem_runner="$bin_dir/codemem"
 
 ensure_node() {
   local major
@@ -47,6 +49,27 @@ write_codemem_config() {
   "observer_max_tokens": $observer_max_tokens
 }
 EOF
+}
+
+install_codemem_runner() {
+  mkdir -p "$bin_dir"
+  cat >"$codemem_runner" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+export CODEMEM_NODE_MAJOR="${CODEMEM_NODE_MAJOR:-24}"
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+  # codemem depends on native modules such as better-sqlite3; keep the
+  # Node ABI stable regardless of the shell/OpenCode process environment.
+  # shellcheck source=/dev/null
+  . "$NVM_DIR/nvm.sh"
+  nvm use "$CODEMEM_NODE_MAJOR" --silent >/dev/null
+fi
+
+exec npx -y codemem "$@"
+EOF
+  chmod 755 "$codemem_runner"
 }
 
 run_codemem_setup() {
@@ -156,6 +179,7 @@ verify() {
 
 ensure_node
 write_codemem_config
+install_codemem_runner
 run_codemem_setup
 normalize_opencode_config
 patch_openchamber_wrapper
@@ -172,6 +196,9 @@ codemem config:
 
 OpenChamber wrapper:
   $wrapper
+
+codemem runner:
+  $codemem_runner
 
 Observer:
   provider=$observer_provider model=$observer_model runtime=$observer_runtime

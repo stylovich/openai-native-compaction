@@ -23,6 +23,8 @@ The script is idempotent and does the following:
 - Adds the `codemem` MCP server to `~/.config/opencode/opencode.json`.
 - Configures the MCP command through `bash -lc` so it loads Node `24` through
   `nvm` even if OpenCode itself was started from a Node `22` environment.
+- Installs `~/.local/bin/codemem`, a Node-24 wrapper used by the OpenCode plugin
+  tools such as `mem-status` and `mem-recent`.
 - Removes known conflicting memory plugins from OpenCode config:
   `opencode-mem`, `opencode-nowledge-mem`, `opencode-supermemory`, and
   `@supermemoryai/opencode-supermemory`.
@@ -81,6 +83,11 @@ npx -y codemem stats
 npx -y codemem db raw-events-status
 npx -y codemem recent --limit 10
 ```
+
+The `mem-status`, `mem-stats`, and `mem-recent` OpenCode plugin tools rely on a
+`codemem` executable being available on `PATH`. The installer provides
+`~/.local/bin/codemem` so those tools do not accidentally use Node `22` and fail
+with a `better-sqlite3.node` `NODE_MODULE_VERSION` mismatch.
 
 The expected OpenCode MCP config for codemem is:
 
