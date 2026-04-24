@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const SERVICE = "openai-native-compaction";
 const DEFAULT_MODEL = "gpt-5.4-mini";
+const DEFAULT_SUMMARY_MODEL = "gpt-5.2";
 const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_TAIL_TURNS = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -1250,7 +1251,7 @@ async function computeNativeSummary({ client, sessionID }) {
   const baseUrl = getBaseUrl();
   const timeoutMs = envInt("OPENCODE_NATIVE_COMPACTION_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
   const model = env("OPENCODE_NATIVE_COMPACTION_MODEL", DEFAULT_MODEL);
-  const summaryModel = env("OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL", model);
+  const summaryModel = env("OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL);
   const reasoningEffort = envReasoningEffort("OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT");
   const summaryReasoningEffort = envReasoningEffort("OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT", reasoningEffort);
 
