@@ -156,6 +156,8 @@ test("buildSummaryPrompt includes the new durable-preferences and discoveries se
   assert.match(prompt, /## Active User Preferences & Constraints/);
   assert.match(prompt, /## Discoveries/);
   assert.match(prompt, /<previous-summary>/);
+  assert.match(prompt, /current-state relevant completed work only/);
+  assert.match(prompt, /Preserve pending user-requested activities/);
 });
 
 test("extractResponseText prefers output_text and falls back to assistant content", () => {

@@ -72,6 +72,7 @@ This installs:
 ```text
 ~/.config/opencode/plugins/openai-native-compaction.js
 ~/.local/bin/opencode-openchamber
+~/.config/opencode/dcp-prompts/overrides/*.md
 ~/.config/opencode/openai-native-compaction.key
 ```
 
@@ -159,6 +160,30 @@ export OPENCODE_NATIVE_COMPACTION_DCP_STORAGE_DIR="$HOME/.local/share/opencode/s
 - When DCP state is present, the plugin reuses active DCP summaries from
   `~/.local/share/opencode/storage/plugin/dcp/<sessionId>.json` and compacts the
   normalized summary instead of the covered raw messages.
+
+## DCP Prompt Overrides
+
+If you use `@tarquinen/opencode-dcp` with this plugin, enable DCP custom prompts
+so DCP summaries stay in Spanish and preserve pending handoff tasks:
+
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/Opencode-DCP/opencode-dynamic-context-pruning/master/dcp.schema.json",
+  "experimental": {
+    "customPrompts": true
+  }
+}
+```
+
+`./scripts/install-global.sh` copies the repo overrides into OpenCode's DCP
+prompt directory. To copy them manually:
+
+```bash
+mkdir -p ~/.config/opencode/dcp-prompts/overrides
+cp dcp-prompts/overrides/*.md ~/.config/opencode/dcp-prompts/overrides/
+```
+
+Restart OpenCode/OpenChamber after changing DCP config or prompt files.
 
 ## OpenChamber / VS Code
 

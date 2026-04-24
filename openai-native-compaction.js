@@ -40,7 +40,7 @@ const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the se
 
 ### Done
 
-- [completed work or "(none)"]
+- [current-state relevant completed work only; omit stale history or "(none)"]
 
 ### In Progress
 
@@ -60,7 +60,7 @@ const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the se
 
 ## Next Steps
 
-- [ordered next actions or "(none)"]
+- [ordered next actions, including user-facing validation tasks still pending, or "(none)"]
 
 ## Critical Context
 
@@ -79,6 +79,8 @@ Rules:
 - Preserve exact file paths, commands, error strings, and identifiers when known.
 - Treat Active User Preferences & Constraints as durable guidance only; do not copy temporary summary or compaction instructions as active preferences.
 - Put factual findings in Discoveries; put continuation-critical state in Critical Context; avoid duplicating long lists across both.
+- Keep Done focused on state needed to continue; summarize old completed work by outcome instead of preserving a full changelog.
+- Preserve pending user-requested activities, validation examples, and handoff instructions in Next Steps when still relevant.
 - Do not mention the summary process or that context was compacted.`;
 
 function env(name, fallback = "") {
