@@ -57,6 +57,60 @@ database remains local at:
 `observer_auth_source: "auto"` lets codemem use the available OpenAI/Codex auth
 from the local OpenCode login or compatible environment variables.
 
+## Non-OpenAI Providers
+
+The recommended config is OpenAI-first because this repo also targets OpenAI
+native compaction. That does not mean codemem can use `gpt-5.4-mini` without
+OpenAI/Codex credentials. The default observer model only defines what model to
+request; it does not provide authentication.
+
+If a machine does not have OpenAI/Codex auth, configure codemem to use a provider
+and model that are actually available on that machine.
+
+Example Anthropic config:
+
+```jsonc
+{
+  "observer_provider": "anthropic",
+  "observer_model": "claude-haiku-4-5",
+  "observer_runtime": "api_http",
+  "observer_auth_source": "auto",
+  "observer_max_chars": 12000,
+  "observer_max_tokens": 4000
+}
+```
+
+Then provide credentials supported by that provider, for example:
+
+```bash
+export ANTHROPIC_API_KEY="..."
+```
+
+For a custom OpenCode provider, use the provider key from
+`~/.config/opencode/opencode.json` and a model from that provider:
+
+```jsonc
+{
+  "observer_provider": "my-provider",
+  "observer_model": "my-model",
+  "observer_runtime": "api_http",
+  "observer_auth_source": "auto",
+  "observer_max_chars": 12000,
+  "observer_max_tokens": 4000
+}
+```
+
+After changing providers, restart OpenCode/OpenChamber and verify:
+
+```bash
+codemem stats
+codemem db raw-events-status
+```
+
+Important: codemem does not automatically follow the active chat model selected
+in OpenCode. The observer is fixed by `~/.config/codemem/config.jsonc` or by
+`CODEMEM_OBSERVER_PROVIDER` / `CODEMEM_OBSERVER_MODEL`.
+
 ## Runtime Flow
 
 After restarting OpenCode/OpenChamber:
@@ -134,6 +188,7 @@ server and explains when to search, remember, or forget memories.
 Override installer defaults:
 
 ```bash
+CODEMEM_OBSERVER_PROVIDER="openai" CODEMEM_OBSERVER_MODEL="gpt-5.4-mini" ./codemem/install-codemem.sh
 CODEMEM_OBSERVER_MODEL="gpt-5.4-mini" ./codemem/install-codemem.sh
 CODEMEM_NODE_MAJOR="24" ./codemem/install-codemem.sh
 ```
@@ -156,8 +211,8 @@ and viewer auto-start enabled.
 - `api_http` is codemem's own observer runtime. It does not automatically use
   the active chat model selected in OpenCode.
 - The observer model is fixed by `~/.config/codemem/config.jsonc` or by
-  `CODEMEM_OBSERVER_MODEL`.
-- `codemem` stores data locally, but the observer model call is remote when the
-  provider is `openai`.
+  `CODEMEM_OBSERVER_PROVIDER` / `CODEMEM_OBSERVER_MODEL`.
+- `codemem` stores data locally, but the observer model call is remote for
+  hosted providers such as OpenAI or Anthropic.
 - Keep only one memory plugin active at a time to avoid duplicated system-prompt
   injection.
