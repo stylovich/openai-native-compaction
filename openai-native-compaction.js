@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const SERVICE = "openai-native-compaction";
 const DEFAULT_MODEL = "gpt-5.4";
@@ -10,6 +10,7 @@ const DEFAULT_TOOL_OUTPUT_MAX_CHARS = 6_000;
 const DEFAULT_MIN_COMPACT_ITEM_CHARS = 2_048;
 const DEFAULT_API_KEY_FILE = `${process.env.HOME || ""}/.config/opencode/openai-native-compaction.key`;
 const DEFAULT_OPENCODE_AUTH_PATH = `${process.env.HOME || ""}/.local/share/opencode/auth.json`;
+const DEFAULT_MESSAGE_DUMP_DIR = `${process.env.XDG_DATA_HOME || `${process.env.HOME || ""}/.local/share`}/opencode/openai-native-compaction-message-dumps`;
 const DEFAULT_DCP_STORAGE_DIR = `${process.env.XDG_DATA_HOME || `${process.env.HOME || ""}/.local/share`}/opencode/storage/plugin/dcp`;
 const DCP_COMPRESSED_BLOCK_HEADER = "[Compressed conversation section]";
 const DCP_HEADER_REGEX = /^\s*\[Compressed conversation(?: section)?(?: b\d+)?\]/i;
@@ -21,6 +22,7 @@ const INTERNAL_COMPACTION_SIGNATURES = [
   "Return a concise markdown summary",
 ];
 const DEFAULT_COMPACTION_STATE_MAX_AGE_MS = 5 * 60_000;
+const DEFAULT_MESSAGE_DUMP_LIMIT = 200;
 
 // Preserve operational continuity while retaining important factual discoveries.
 const SUMMARY_TEMPLATE = `Output exactly this Markdown structure and keep the section order unchanged:
@@ -810,6 +812,82 @@ function buildMinimalCompactionMessages(messages) {
   ];
 }
 
+function safeFilenameSegment(value) {
+  return String(value || "unknown").replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function messageDumpStats(messages) {
+  const stats = {
+    messages: Array.isArray(messages) ? messages.length : 0,
+    parts: 0,
+    textChars: 0,
+    reasoningChars: 0,
+    toolOutputChars: 0,
+    toolInputChars: 0,
+    partTypes: {},
+    roles: {},
+    agents: {},
+  };
+
+  for (const entry of Array.isArray(messages) ? messages : []) {
+    const info = entry?.info || {};
+    if (info.role) stats.roles[info.role] = (stats.roles[info.role] || 0) + 1;
+    if (info.agent) stats.agents[info.agent] = (stats.agents[info.agent] || 0) + 1;
+
+    for (const part of Array.isArray(entry?.parts) ? entry.parts : []) {
+      stats.parts += 1;
+      const type = part?.type || "unknown";
+      stats.partTypes[type] = (stats.partTypes[type] || 0) + 1;
+
+      if (typeof part?.text === "string") stats.textChars += part.text.length;
+      if (type === "reasoning" && typeof part?.text === "string") stats.reasoningChars += part.text.length;
+      if (part?.state?.output) stats.toolOutputChars += String(part.state.output).length;
+      if (part?.state?.input) stats.toolInputChars += JSON.stringify(part.state.input).length;
+      if (part?.state?.raw) stats.toolInputChars += String(part.state.raw).length;
+    }
+  }
+
+  return stats;
+}
+
+async function dumpMessagesTransform({ client, sessionID, stage, messages, sequence }) {
+  if (!envBool("OPENCODE_NATIVE_COMPACTION_DUMP_MESSAGES", false)) return;
+
+  const dumpDir = env("OPENCODE_NATIVE_COMPACTION_MESSAGE_DUMP_DIR", DEFAULT_MESSAGE_DUMP_DIR);
+  const safeSessionID = safeFilenameSegment(sessionID);
+  const sessionDir = `${dumpDir}/${safeSessionID}`;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `${String(sequence).padStart(4, "0")}-${stamp}-${safeFilenameSegment(stage)}.json`;
+  const filePath = `${sessionDir}/${filename}`;
+  const payload = {
+    stage,
+    sessionID,
+    time: new Date().toISOString(),
+    stats: messageDumpStats(messages),
+    messages,
+  };
+
+  try {
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(filePath, JSON.stringify(payload, null, 2));
+
+    if (envBool("OPENCODE_NATIVE_COMPACTION_DEBUG", false)) {
+      await safeLog(client, "info", "PLUGIN_DUMPED_MESSAGES_OPENAI_NATIVE_COMPACTION Dumped chat messages transform batch.", {
+        sessionID,
+        stage,
+        filePath,
+        stats: payload.stats,
+      });
+    }
+  } catch (error) {
+    await safeLog(client, "warn", "PLUGIN_DUMP_MESSAGES_FAILED_OPENAI_NATIVE_COMPACTION Failed to dump chat messages transform batch.", {
+      sessionID,
+      stage,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function openaiRequest({ apiKey, baseUrl, path, body, timeoutMs }) {
   const maxRetries = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_MAX_RETRIES", DEFAULT_MAX_RETRIES));
   const maxAttempts = maxRetries + 1;
@@ -1192,7 +1270,9 @@ export const server = async ({ client }) => {
   let warnedMissingKey = false;
   const pendingCompactions = new Map();
   const activeCompactionTransforms = new Set();
+  const messageDumpCounts = new Map();
   const compactionStateMaxAgeMs = envInt("OPENCODE_NATIVE_COMPACTION_STATE_MAX_AGE_MS", DEFAULT_COMPACTION_STATE_MAX_AGE_MS);
+  const messageDumpLimit = Math.max(0, envInt("OPENCODE_NATIVE_COMPACTION_MESSAGE_DUMP_LIMIT", DEFAULT_MESSAGE_DUMP_LIMIT));
 
   function clearCompactionState(sessionID) {
     if (!sessionID) return;
@@ -1251,6 +1331,20 @@ export const server = async ({ client }) => {
 
       const sessionID = getSessionIDFromMessages(output.messages);
       if (!sessionID) return;
+
+      const currentDumpCount = messageDumpCounts.get(sessionID) || 0;
+      const canDump = messageDumpLimit === 0 || currentDumpCount < messageDumpLimit;
+      if (canDump) {
+        messageDumpCounts.set(sessionID, currentDumpCount + 1);
+        await dumpMessagesTransform({
+          client,
+          sessionID,
+          stage: "pre-native-transform",
+          messages: output.messages,
+          sequence: currentDumpCount + 1,
+        });
+      }
+
       if (!pendingCompactions.has(sessionID)) return;
 
       const shouldTrim = activeCompactionTransforms.has(sessionID) || hasRecentCompactionMarker(output.messages);
@@ -1267,6 +1361,19 @@ export const server = async ({ client }) => {
           sessionID,
           previousCount,
           nextCount: output.messages.length,
+        });
+      }
+
+      const nextDumpCount = messageDumpCounts.get(sessionID) || 0;
+      const canDumpTrimmed = messageDumpLimit === 0 || nextDumpCount < messageDumpLimit;
+      if (canDumpTrimmed) {
+        messageDumpCounts.set(sessionID, nextDumpCount + 1);
+        await dumpMessagesTransform({
+          client,
+          sessionID,
+          stage: "post-native-transform",
+          messages: output.messages,
+          sequence: nextDumpCount + 1,
         });
       }
     },
@@ -1349,6 +1456,7 @@ export const __test = {
   normalizeCompactedWindow,
   OpenAIRequestError,
   applyDcpInterop,
+  messageDumpStats,
   errorMetadata,
   isRetryableStatus,
   isSyntheticDcpSummaryMessage,

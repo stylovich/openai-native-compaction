@@ -82,6 +82,50 @@ test("buildMinimalCompactionMessages keeps a tiny user compaction batch", () => 
   assert.equal(__test.hasRecentCompactionMarker(messages), true);
 });
 
+test("messageDumpStats summarizes transformed message batches", () => {
+  const stats = __test.messageDumpStats([
+    {
+      info: {
+        id: "msg_user",
+        sessionID: "ses_test",
+        role: "user",
+        agent: "build",
+      },
+      parts: [{ type: "text", text: "hola" }],
+    },
+    {
+      info: {
+        id: "msg_assistant",
+        sessionID: "ses_test",
+        role: "assistant",
+        agent: "build",
+      },
+      parts: [
+        { type: "reasoning", text: "pensando" },
+        {
+          type: "tool",
+          state: {
+            input: { q: "abc" },
+            output: "resultado",
+          },
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(stats.messages, 2);
+  assert.equal(stats.parts, 3);
+  assert.equal(stats.textChars, 12);
+  assert.equal(stats.reasoningChars, 8);
+  assert.equal(stats.toolOutputChars, 9);
+  assert.equal(stats.partTypes.text, 1);
+  assert.equal(stats.partTypes.reasoning, 1);
+  assert.equal(stats.partTypes.tool, 1);
+  assert.equal(stats.roles.user, 1);
+  assert.equal(stats.roles.assistant, 1);
+  assert.equal(stats.agents.build, 2);
+});
+
 test("parseApiKey supports raw and assignment formats", () => {
   assert.equal(__test.parseApiKey("sk-test"), "sk-test");
   assert.equal(__test.parseApiKey("OPENAI_API_KEY=sk-test"), "sk-test");
