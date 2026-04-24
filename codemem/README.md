@@ -21,6 +21,8 @@ The script is idempotent and does the following:
 - Runs `npx -y codemem setup --opencode-only`.
 - Adds the `@codemem/opencode-plugin` plugin to `~/.config/opencode/opencode.json`.
 - Adds the `codemem` MCP server to `~/.config/opencode/opencode.json`.
+- Configures the MCP command through `bash -lc` so it loads Node `24` through
+  `nvm` even if OpenCode itself was started from a Node `22` environment.
 - Removes known conflicting memory plugins from OpenCode config:
   `opencode-mem`, `opencode-nowledge-mem`, `opencode-supermemory`, and
   `@supermemoryai/opencode-supermemory`.
@@ -78,6 +80,24 @@ Restart OpenCode/OpenChamber, then run:
 npx -y codemem stats
 npx -y codemem db raw-events-status
 npx -y codemem recent --limit 10
+```
+
+The expected OpenCode MCP config for codemem is:
+
+```jsonc
+{
+  "mcp": {
+    "codemem": {
+      "type": "local",
+      "command": [
+        "bash",
+        "-lc",
+        "export NVM_DIR=\"${NVM_DIR:-$HOME/.nvm}\"; if [ -s \"$NVM_DIR/nvm.sh\" ]; then . \"$NVM_DIR/nvm.sh\"; nvm use \"${CODEMEM_NODE_MAJOR:-24}\" --silent >/dev/null; fi; exec npx -y codemem mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
 ```
 
 OpenCode-side logs:
