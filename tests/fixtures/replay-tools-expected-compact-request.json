@@ -1,5 +1,8 @@
 {
   "model": "gpt-5.4",
+  "reasoning": {
+    "effort": "medium"
+  },
   "input": [
     {
       "type": "message",

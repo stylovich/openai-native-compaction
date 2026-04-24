@@ -1,5 +1,8 @@
 {
   "model": "gpt-5.4-mini",
+  "reasoning": {
+    "effort": "medium"
+  },
   "store": false,
   "instructions": "You are writing a continuation summary for OpenCode compaction. Output only the requested Markdown and nothing else.",
   "input": [

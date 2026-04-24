@@ -133,6 +133,24 @@ test("parseApiKey supports raw and assignment formats", () => {
   assert.equal(__test.parseApiKey("# comment only\n\n"), "");
 });
 
+test("envReasoningEffort defaults to medium and supports disabling", () => {
+  const previous = process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+
+  try {
+    delete process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+    assert.equal(__test.envReasoningEffort("OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT"), "medium");
+
+    process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = "HIGH";
+    assert.equal(__test.envReasoningEffort("OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT"), "high");
+
+    process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = "none";
+    assert.equal(__test.envReasoningEffort("OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT"), "");
+  } finally {
+    if (previous === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+    else process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = previous;
+  }
+});
+
 test("parseRetryAfterMs supports seconds and HTTP dates", () => {
   assert.equal(__test.parseRetryAfterMs("1.5"), 1500);
 
@@ -326,11 +344,15 @@ test("computeNativeSummary replays compact -> responses using the sanitized fixt
   const previousApiKey = process.env.OPENAI_API_KEY;
   const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
   const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousReasoningEffort = process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+  const previousSummaryReasoningEffort = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT;
   const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
 
   process.env.OPENAI_API_KEY = "sk-test";
   process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
   process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = "medium";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT = "medium";
   process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "2";
 
   globalThis.fetch = async (url, options) => {
@@ -379,6 +401,12 @@ test("computeNativeSummary replays compact -> responses using the sanitized fixt
 
     if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
     else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+
+    if (previousReasoningEffort === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+    else process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = previousReasoningEffort;
+
+    if (previousSummaryReasoningEffort === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT = previousSummaryReasoningEffort;
 
     if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
     else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
@@ -476,6 +504,8 @@ test("computeNativeSummary serializes tool-heavy history with truncation and pre
   const previousApiKey = process.env.OPENAI_API_KEY;
   const previousModel = process.env.OPENCODE_NATIVE_COMPACTION_MODEL;
   const previousSummaryModel = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
+  const previousReasoningEffort = process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+  const previousSummaryReasoningEffort = process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT;
   const previousTailTurns = process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
   const previousToolChars = process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;
   const previousReasoning = process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING;
@@ -484,6 +514,8 @@ test("computeNativeSummary serializes tool-heavy history with truncation and pre
   process.env.OPENAI_API_KEY = "sk-test";
   process.env.OPENCODE_NATIVE_COMPACTION_MODEL = "gpt-5.4";
   process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = "gpt-5.4-mini";
+  process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = "medium";
+  process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT = "medium";
   process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = "2";
   process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS = "80";
   process.env.OPENCODE_NATIVE_COMPACTION_INCLUDE_REASONING = "0";
@@ -532,6 +564,10 @@ test("computeNativeSummary serializes tool-heavy history with truncation and pre
     else process.env.OPENCODE_NATIVE_COMPACTION_MODEL = previousModel;
     if (previousSummaryModel === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL;
     else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL = previousSummaryModel;
+    if (previousReasoningEffort === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT;
+    else process.env.OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT = previousReasoningEffort;
+    if (previousSummaryReasoningEffort === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT;
+    else process.env.OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT = previousSummaryReasoningEffort;
     if (previousTailTurns === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS;
     else process.env.OPENCODE_NATIVE_COMPACTION_TAIL_TURNS = previousTailTurns;
     if (previousToolChars === undefined) delete process.env.OPENCODE_NATIVE_COMPACTION_TOOL_OUTPUT_CHARS;

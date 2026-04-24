@@ -1,7 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const SERVICE = "openai-native-compaction";
-const DEFAULT_MODEL = "gpt-5.4";
+const DEFAULT_MODEL = "gpt-5.4-mini";
+const DEFAULT_REASONING_EFFORT = "medium";
 const DEFAULT_TAIL_TURNS = 2;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_RETRIES = 1;
@@ -99,6 +100,16 @@ function envBool(name, fallback = false) {
   const raw = process.env[name];
   if (!raw) return fallback;
   return /^(1|true|yes|on)$/i.test(raw);
+}
+
+function envReasoningEffort(name, fallback = DEFAULT_REASONING_EFFORT) {
+  const raw = env(name, fallback).trim().toLowerCase();
+  if (!raw || /^(0|false|no|off|none|disabled)$/i.test(raw)) return "";
+  return raw;
+}
+
+function withReasoning(body, effort) {
+  return effort ? { ...body, reasoning: { effort } } : body;
 }
 
 function unwrap(result) {
@@ -1050,6 +1061,7 @@ async function compactWithAdaptiveReduction({
   baseUrl,
   timeoutMs,
   model,
+  reasoningEffort,
   inputItems,
   client,
   sessionID,
@@ -1064,10 +1076,13 @@ async function compactWithAdaptiveReduction({
         baseUrl,
         path: "/responses/compact",
         timeoutMs,
-        body: {
-          model,
-          input: candidateItems,
-        },
+        body: withReasoning(
+          {
+            model,
+            input: candidateItems,
+          },
+          reasoningEffort,
+        ),
       });
 
       return {
@@ -1213,12 +1228,15 @@ async function computeNativeSummary({ client, sessionID }) {
   const timeoutMs = envInt("OPENCODE_NATIVE_COMPACTION_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
   const model = env("OPENCODE_NATIVE_COMPACTION_MODEL", DEFAULT_MODEL);
   const summaryModel = env("OPENCODE_NATIVE_COMPACTION_SUMMARY_MODEL", model);
+  const reasoningEffort = envReasoningEffort("OPENCODE_NATIVE_COMPACTION_REASONING_EFFORT");
+  const summaryReasoningEffort = envReasoningEffort("OPENCODE_NATIVE_COMPACTION_SUMMARY_REASONING_EFFORT", reasoningEffort);
 
   const { compacted } = await compactWithAdaptiveReduction({
     apiKey,
     baseUrl,
     timeoutMs,
     model,
+    reasoningEffort,
     inputItems,
     client,
     sessionID,
@@ -1238,20 +1256,23 @@ async function computeNativeSummary({ client, sessionID }) {
     baseUrl,
     path: "/responses",
     timeoutMs,
-    body: {
-      model: summaryModel,
-      store: false,
-      instructions:
-        "You are writing a continuation summary for OpenCode compaction. Output only the requested Markdown and nothing else.",
-      input: [
-        ...compactedWindow,
-        {
-          type: "message",
-          role: "user",
-          content: buildSummaryPrompt(previousSummary),
-        },
-      ],
-    },
+    body: withReasoning(
+      {
+        model: summaryModel,
+        store: false,
+        instructions:
+          "You are writing a continuation summary for OpenCode compaction. Output only the requested Markdown and nothing else.",
+        input: [
+          ...compactedWindow,
+          {
+            type: "message",
+            role: "user",
+            content: buildSummaryPrompt(previousSummary),
+          },
+        ],
+      },
+      summaryReasoningEffort,
+    ),
   });
 
   const summary = extractResponseText(summaryResponse);
@@ -1450,6 +1471,7 @@ export const __test = {
   extractResponseText,
   getSessionIDFromMessages,
   hasRecentCompactionMarker,
+  envReasoningEffort,
   isInternalCompactionSystemPrompt,
   isCompactOversizeError,
   isRequestTooLargeMessage,
