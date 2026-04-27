@@ -1395,9 +1395,6 @@ export const server = async ({ client }) => {
 
       if (!pendingCompactions.has(sessionID)) return;
 
-      const shouldTrim = activeCompactionTransforms.has(sessionID) || hasRecentCompactionMarker(output.messages);
-      if (!shouldTrim) return;
-
       const replacement = buildMinimalCompactionMessages(output.messages);
       if (replacement.length === 0) return;
 
